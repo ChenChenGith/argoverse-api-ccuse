@@ -25,25 +25,50 @@ def collate_fn(data_tuple):  # data_tuple是一个列表，列表中包含batchs
     data_length = [len(sq) for sq in data]
     data = rnn_utils.pad_sequence(data, batch_first=True, padding_value=0.0)  # 用零补充，使长度对齐
     label = rnn_utils.pad_sequence(label, batch_first=True, padding_value=0.0)  # 这行代码只是为了把列表变为tensor
-    return data.unsqueeze(-1), label, data_length
+    re_data = data.unsqueeze(-1) if data. dim() < 3 else data
+    return re_data, label, data_length
 
 
 if __name__ == '__main__':
 
     EPOCH = 2
+    inputsize = 2
     batchsize = 3
     hiddensize = 4
     num_layers = 2
     learning_rate = 0.001
 
     # 训练数据
-    train_x = [torch.FloatTensor([1, 1, 1, 1, 1, 1, 1]),
-               torch.FloatTensor([2, 2, 2, 2, 2, 2]),
-               torch.FloatTensor([3, 3, 3, 3, 3]),
-               torch.FloatTensor([4, 4, 4, 4]),
-               torch.FloatTensor([5, 5, 5]),
-               torch.FloatTensor([6, 6]),
-               torch.FloatTensor([7])]
+    # train_x = [torch.FloatTensor([1]*7),
+    #            torch.FloatTensor([2]*6),
+    #            torch.FloatTensor([3]*5),
+    #            torch.FloatTensor([4]*4),
+    #            torch.FloatTensor([5]*3),
+    #            torch.FloatTensor([6]*2),
+    #            torch.FloatTensor([7])]
+
+    train_x = [torch.FloatTensor([[1, 1.2]] * 7),
+               torch.FloatTensor([[2, 2.2]] * 6),
+               torch.FloatTensor([[3, 3.3]] * 5),
+               torch.FloatTensor([[4, 4.4]] * 4),
+               torch.FloatTensor([[5, 5.5]] * 3),
+               torch.FloatTensor([[6, 6.6]] * 2),
+               torch.FloatTensor([[7, 7.7]])]
+    # train_x = [torch.FloatTensor([[1] * 7, [1.1] * 7]),
+    #            torch.FloatTensor([[2] * 6, [2.2] * 6]),
+    #            torch.FloatTensor([[3] * 5, [3.2] * 5]),
+    #            torch.FloatTensor([[4] * 4, [4.2] * 4]),
+    #            torch.FloatTensor([[5] * 3, [5.2] * 3]),
+    #            torch.FloatTensor([[6] * 2, [6.2] * 2]),
+    #            torch.FloatTensor([[7, 7.7]])]
+
+    # train_x = [torch.FloatTensor([[1, 1.1], [1, 1.1], [1, 1.1], [1, 1.1], [1, 1.1], [1, 1.1], [1, 1.1]]),
+    #            torch.FloatTensor([[2, 2.2], [2, 2.2], [2, 2.2], [2, 2.2], [2, 2.2], [2, 2.2]]),
+    #            torch.FloatTensor([[3, 3.3], [3, 3.3], [3, 3.3], [3, 3.3], [3, 3.3]]),
+    #            torch.FloatTensor([[4, 4.4], [4, 4.4], [4, 4.4], [4, 4.4]]),
+    #            torch.FloatTensor([[5, 5.5], [5, 5.5], [5, 5.5]]),
+    #            torch.FloatTensor([[6, 6.6], [6, 6.6]]),
+    #            torch.FloatTensor([[7, 7.7]])]
     # 标签
     train_y = [torch.rand(7, hiddensize),
                torch.rand(6, hiddensize),
@@ -53,9 +78,9 @@ if __name__ == '__main__':
                torch.rand(2, hiddensize),
                torch.rand(1, hiddensize)]
 
-    data_ = MyData(train_x, train_y)
+    data_ = MyData(train_x, train_y)  # 注意这里是一个数据集对象，其中定义了__getitem__方法，调用时才是输出对应的数据
     data_loader = DataLoader(data_, batch_size=batchsize, shuffle=True, collate_fn=collate_fn)
-    net = nn.LSTM(input_size=1, hidden_size=hiddensize, num_layers=num_layers, batch_first=True)
+    net = nn.LSTM(input_size=inputsize, hidden_size=hiddensize, num_layers=num_layers, batch_first=True)
     criteria = nn.MSELoss()
     optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
 
