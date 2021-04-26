@@ -180,20 +180,19 @@ class ArgoverseForecastingLoader:
         seq_df = copy.deepcopy(self.seq_df[:])  # copy seq_df
         seq_df['TIMESTAMP'] -= seq_df['TIMESTAMP'][0]  # time normalization
         seq_df['TIMESTAMP'] = seq_df['TIMESTAMP'].round(1)
+        seq_df.sort_values('TIMESTAMP')
         know_data = seq_df[seq_df['TIMESTAMP'] < know_num / 10]  # the known data for all tracks
         know_data = know_data.sort_values(['OBJECT_TYPE', 'TRACK_ID'])  # sort by type and id, for the factorize
         know_data['TRACK_ID'] = pd.factorize(know_data['TRACK_ID'])[0]
-        know_data = know_data[['TIMESTAMP', 'TRACK_ID', 'X', 'Y', 'CITY_NAME']]  # reserve useful data
+        know_data = know_data[['TIMESTAMP', 'TRACK_ID', 'X', 'Y']]  # reserve useful data
         if not agent_first:  # exchange index of agent and AV
             know_data['TRACK_ID'][:know_num] = 1
             know_data['TRACK_ID'][know_num:know_num * 2] = 0
 
             pre_data = seq_df[(seq_df['TIMESTAMP'] >= know_num / 10) & (seq_df['OBJECT_TYPE'] == 'AGENT')] \
                 [['TIMESTAMP','X', 'Y']]
-            pre_data = pre_data.sort_values('TIMESTAMP')
         else:
             pre_data = seq_df[(seq_df['TIMESTAMP'] >= know_num / 10) & (seq_df['OBJECT_TYPE'] == 'AV')] \
-                [['TIMESTAMP','X', 'Y']]
-            pre_data = pre_data.sort_values('TIMESTAMP')
+                [['X', 'Y']]
 
-        return know_data, pre_data
+        return (know_data, pre_data)

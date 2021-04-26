@@ -1,7 +1,7 @@
 # Argoverse API - ChenChen customed
 
 Customed code for my study use
-> Original reository see [Argoverse api](https://github.com/argoai/argoverse-api)
+> Original repository see [Argoverse api](https://github.com/argoai/argoverse-api)
 
 ## Changes
 ### 1. Maps
@@ -50,11 +50,11 @@ Add a function in [ArgoverseForecastingLoader.py](argoverse/data_loading/argover
 ``` python
 '''
 Args:
-    know_num: how many data is know for prediction, unit: ms
-    agent_first: True if the agent vehicle' trajectory is the prediction target, else using AV
+    know_num: int, how many data is know for prediction, unit: ms
+    agent_first: bool, True if the agent vehicle' trajectory is the prediction target, else using AV
 Returns:
-    train_data: pd.DataFrame(columns = ['TIMESTAMP', 'TRACK_ID', 'X', 'Y', 'CITY_NAME'])
-    pred_data: pd.DataFrame(columns = ['TIMESTAMP','X', 'Y'])
+    train_data: pd.DataFrame(columns = ['TIMESTAMP', 'TRACK_ID', 'X', 'Y'])
+    pred_data: pd.DataFrame(columns = ['X', 'Y'])  # order is in scending time
 '''
 afl = ArgoverseForecastingLoader(root_dir)
 train_data, pred_truth = afl[0].get_all_traj_for_train(know_num=20, agent_first=True)

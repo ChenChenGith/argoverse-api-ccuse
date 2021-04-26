@@ -25,7 +25,7 @@ def collate_fn(data_tuple):  # data_tuple是一个列表，列表中包含batchs
     data_length = [len(sq) for sq in data]
     data = rnn_utils.pad_sequence(data, batch_first=True, padding_value=0.0)  # 用零补充，使长度对齐
     label = rnn_utils.pad_sequence(label, batch_first=True, padding_value=0.0)  # 这行代码只是为了把列表变为tensor
-    re_data = data.unsqueeze(-1) if data. dim() < 3 else data
+    re_data = data.unsqueeze(-1) if data.dim() < 3 else data
     return re_data, label, data_length
 
 
@@ -34,8 +34,8 @@ if __name__ == '__main__':
     EPOCH = 2
     inputsize = 2
     batchsize = 3
-    hiddensize = 4
-    num_layers = 2
+    hiddensize = 30
+    num_layers = 4
     learning_rate = 0.001
 
     # 训练数据
@@ -70,13 +70,13 @@ if __name__ == '__main__':
     #            torch.FloatTensor([[6, 6.6], [6, 6.6]]),
     #            torch.FloatTensor([[7, 7.7]])]
     # 标签
-    train_y = [torch.rand(7, hiddensize),
-               torch.rand(6, hiddensize),
-               torch.rand(5, hiddensize),
-               torch.rand(4, hiddensize),
-               torch.rand(3, hiddensize),
-               torch.rand(2, hiddensize),
-               torch.rand(1, hiddensize)]
+    train_y = [torch.rand(7, hiddensize)*1000,
+               torch.rand(6, hiddensize)*1000,
+               torch.rand(5, hiddensize)*1000,
+               torch.rand(4, hiddensize)*1000,
+               torch.rand(3, hiddensize)*1000,
+               torch.rand(2, hiddensize)*1000,
+               torch.rand(1, hiddensize)*1000]
 
     data_ = MyData(train_x, train_y)  # 注意这里是一个数据集对象，其中定义了__getitem__方法，调用时才是输出对应的数据
     data_loader = DataLoader(data_, batch_size=batchsize, shuffle=True, collate_fn=collate_fn)
