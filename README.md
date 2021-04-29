@@ -14,48 +14,51 @@ The range can be customized as follow:
 
 ![](images/find_centerline.png)
 
-Codes can be found [Here](chenchencode/find_centerline_veh_coor.py)
+Codes can be found [Here](chenchencode/arg_customized.py)
 
 **Use:**
 ``` python
-from find_centerline_veh_coor import find_centerline_veh_coor
+from chenchencode.arg_customized import find_centerline_veh_coor
 
 f = find_centerline_veh_coor(x0, y0, theta, city, range_dis_front, range_dis_back, range_dis_side)
 surr_centerline = f.find()  # -> np.array(n,m,3)
 ```
 
-### 2. Data loader
+### 2. Data loader customized
 #### 2.1 Get other vehicle data from forecasting data
+
+*A new module in '../chenchencode/arg_customized'*
+
 > 20210423
 
 The original API only provides function for agent trajectory finding, but not other vehicles.
 
-Add a function in [ArgoverseForecastingLoader.py](argoverse/data_loading/argoverse_forecasting_loader.py)
+Codes can be found [Here](chenchencode/arg_customized.py)
 
 **Use:**
 ``` python
-from argoverse.data_loading.argoverse_forecasting_loader import ArgoverseForecastingLoader
+from chenchencode.arg_customized import data_loader_customized
 
-afl = ArgoverseForecastingLoader(root_dir)
-afl[i].get_ov_traj(track_id)  # i: squence (*.csv file) int ID    -> np.array(n,2)
+fdlc = data_loader_customized(root_dir)
+fdlc[i].get_ov_traj(track_id)  # i: squence (*.csv file) int ID    -> np.array(n,2)
 ```
 #### 2.2 Get training data from a sequence (a *.csv file)
 > 20210425
 
 A function that can extract data for a training algorithm.
 
-Add a function in [ArgoverseForecastingLoader.py](argoverse/data_loading/argoverse_forecasting_loader.py)
+Codes can be found [Here](chenchencode/arg_customized.py)
 
 **Use:**
 ``` python
-'''
-Args:
-    know_num: int, how many data is know for prediction, unit: ms
-    agent_first: bool, True if the agent vehicle' trajectory is the prediction target, else using AV
-Returns:
-    train_data: pd.DataFrame(columns = ['TIMESTAMP', 'TRACK_ID', 'X', 'Y'])
-    pred_data: pd.DataFrame(columns = ['X', 'Y'])  # order is in scending time
-'''
-afl = ArgoverseForecastingLoader(root_dir)
-train_data, pred_truth = afl[0].get_all_traj_for_train(know_num=20, agent_first=True)
+from chenchencode.arg_customized import data_loader_customized
+# Args:
+#     know_num: int, how many data is know for prediction, unit: ms
+#     agent_first: bool, True if the agent vehicle' trajectory is the prediction target, else using AV
+# Returns:
+#     train_data: pd.DataFrame(columns = ['TIMESTAMP', 'TRACK_ID', 'X', 'Y'])
+#     pred_data: pd.DataFrame(columns = ['X', 'Y'])  # order is in scending time
+
+fdlc = data_loader_customized(root_dir)
+train_data, pred_truth = fdlc.get_all_traj_for_train(know_num=20, agent_first=True)
 ```

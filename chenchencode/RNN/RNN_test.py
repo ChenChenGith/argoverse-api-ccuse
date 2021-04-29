@@ -29,13 +29,42 @@ def collate_fn(data_tuple):  # data_tuple是一个列表，列表中包含batchs
     return re_data, label, data_length
 
 
+class RNN(nn.Module):
+    def __init__(self, inputsize, hiddensize, num_layers, outputsize):
+        super(RNN, self).__init__()
+        self.rnn = nn.LSTM(
+            input_size=inputsize,
+            hidden_size=hiddensize,
+            num_layers=num_layers,
+            batch_first=True
+        )
+        self.out = nn.Sequential(
+            nn.Linear(hiddensize, hiddensize),
+            nn.ReLU(),
+            nn.Linear(hiddensize, outputsize)
+        )
+
+    def forward(self, x):
+        r_out, (h_n, h_c) = self.rnn(x, None)  # None 表示 hidden state 会用全0的 state
+        # out_pad, out_len = rnn_utils.pad_packed_sequence(r_out, batch_first=True)
+        # batch_size, seq_len, hid_dim = out_pad.shape
+        # y = out_pad.reshape(batch_size*seq_len,hid_dim)
+        # y = self.out(y)
+        # y = y.view(seq_len, batch_size, -1)
+
+        out = self.out(h_n[-1])
+        # print(self.out.state_dict()['0.weight'])
+        return out
+
+
 if __name__ == '__main__':
 
-    EPOCH = 2
+    EPOCH = 5
     inputsize = 2
     batchsize = 3
     hiddensize = 30
-    num_layers = 4
+    num_layers = 2
+    outputsize = 2
     learning_rate = 0.001
 
     # 训练数据
@@ -70,17 +99,18 @@ if __name__ == '__main__':
     #            torch.FloatTensor([[6, 6.6], [6, 6.6]]),
     #            torch.FloatTensor([[7, 7.7]])]
     # 标签
-    train_y = [torch.rand(7, hiddensize)*1000,
-               torch.rand(6, hiddensize)*1000,
-               torch.rand(5, hiddensize)*1000,
-               torch.rand(4, hiddensize)*1000,
-               torch.rand(3, hiddensize)*1000,
-               torch.rand(2, hiddensize)*1000,
-               torch.rand(1, hiddensize)*1000]
+    train_y = [torch.rand(outputsize) * 10000,
+               torch.rand(outputsize) * 10000,
+               torch.rand(outputsize) * 10000,
+               torch.rand(outputsize) * 10000,
+               torch.rand(outputsize) * 10000,
+               torch.rand(outputsize) * 10000,
+               torch.rand(outputsize) * 10000]
 
     data_ = MyData(train_x, train_y)  # 注意这里是一个数据集对象，其中定义了__getitem__方法，调用时才是输出对应的数据
     data_loader = DataLoader(data_, batch_size=batchsize, shuffle=True, collate_fn=collate_fn)
-    net = nn.LSTM(input_size=inputsize, hidden_size=hiddensize, num_layers=num_layers, batch_first=True)
+    # net = nn.LSTM(input_size=inputsize, hidden_size=hiddensize, num_layers=num_layers, batch_first=True)
+    net = RNN(inputsize, hiddensize, num_layers, outputsize)
     criteria = nn.MSELoss()
     optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
 
@@ -88,24 +118,24 @@ if __name__ == '__main__':
     for epoch in range(EPOCH):
         for batch_id, (batch_x, batch_y, batch_x_len) in enumerate(data_loader):
             batch_x_pack = rnn_utils.pack_padded_sequence(batch_x, batch_x_len, batch_first=True)
-            out, _ = net(batch_x_pack)  # out.data's shape (所有序列总长度, hiddensize)
-            out_pad, out_len = rnn_utils.pad_packed_sequence(out, batch_first=True)
-            loss = criteria(out_pad, batch_y)
-            optimizer.zero_grad()
+            out = net(batch_x_pack)  # out.data's shape (所有序列总长度, hiddensize)
+            # out_pad, out_len = rnn_utils.pad_packed_sequence(out, batch_first=True)
+            loss = criteria(out, batch_y)
+            # optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             print('epoch:{:2d}, batch_id:{:2d}, loss:{:6.4f}'.format(epoch, batch_id, loss))
 
-    # 训练方法二
-    for epoch in range(EPOCH):
-        for batch_id, (batch_x, batch_y, batch_x_len) in enumerate(data_loader):
-            batch_x_pack = rnn_utils.pack_padded_sequence(batch_x, batch_x_len, batch_first=True)
-            batch_y_pack = rnn_utils.pack_padded_sequence(batch_y, batch_x_len, batch_first=True)
-            out, _ = net(batch_x_pack)  # out.data's shape (所有序列总长度, hiddensize)
-            loss = criteria(out.data, batch_y_pack.data)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            print('epoch:{:2d}, batch_id:{:2d}, loss:{:6.4f}'.format(epoch, batch_id, loss))
+    # # 训练方法二
+    # for epoch in range(EPOCH):
+    #     for batch_id, (batch_x, batch_y, batch_x_len) in enumerate(data_loader):
+    #         batch_x_pack = rnn_utils.pack_padded_sequence(batch_x, batch_x_len, batch_first=True)
+    #         batch_y_pack = rnn_utils.pack_padded_sequence(batch_y, batch_x_len, batch_first=True)
+    #         out, _ = net(batch_x_pack)  # out.data's shape (所有序列总长度, hiddensize)
+    #         loss = criteria(out.data, batch_y_pack.data)
+    #         optimizer.zero_grad()
+    #         loss.backward()
+    #         optimizer.step()
+    #         print('epoch:{:2d}, batch_id:{:2d}, loss:{:6.4f}'.format(epoch, batch_id, loss))
 
     print('Training done!')

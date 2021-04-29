@@ -8,7 +8,7 @@ import torch.nn.utils.rnn as rnn_utils
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
-from chenchencode.find_centerline_veh_coor import find_centerline_veh_coor
+from chenchencode.arg_customized import find_centerline_veh_coor
 from argoverse.data_loading.argoverse_forecasting_loader import ArgoverseForecastingLoader
 
 import torch.utils.data as data_
@@ -24,7 +24,7 @@ class MyData(data_.Dataset):
     def __getitem__(self, idx):
         train_data, pred_data = self.afl[idx].get_all_traj_for_train()
         tuple_ = (
-        torch.FloatTensor(np.array(train_data)), torch.FloatTensor(np.array(pred_data.iloc[:30, :]).reshape(-1, 1)))
+        torch.FloatTensor(np.array(train_data)), torch.FloatTensor(np.array(pred_data.iloc[:30, :]).reshape(-1)))
         return tuple_
 
 
@@ -40,24 +40,23 @@ def collate_fn(data_tuple):  # data_tuple是一个列表，列表中包含batchs
 
 
 class RNN(nn.Module):
-    def __init__(self, inputsize, hiddensize, num_layers, collate_fn):
+    def __init__(self, inputsize, hiddensize, num_layers):
         super(RNN, self).__init__()
         self.rnn = nn.LSTM(
             input_size=inputsize,
             hidden_size=hiddensize,
             num_layers=num_layers,
-            batch_first=True,
-            collate_fn=collate_fn
+            batch_first=True
         )
         self.out = nn.Sequential(
-            nn.Linear(64, 1)
+            nn.Linear(hiddensize, 60)
         )
 
     def forward(self, x):
         r_out, (h_n, h_c) = self.rnn(x, None)  # None 表示 hidden state 会用全0的 state
-        out = self.out(r_out)
+        # out_pad, out_len = rnn_utils.pad_packed_sequence(r_out, batch_first=True)
+        out = self.out(h_n[-1])
         return out
-
 
 # ————————————————
 # 版权声明：本文为CSDN博主「肥宅_Sean」的原创文章，遵循CC 4.0 BY-SA版权协议，转载请附上原文出处链接及本声明。
@@ -66,17 +65,17 @@ class RNN(nn.Module):
 
 if __name__ == '__main__':
 
-    EPOCH = 10
+    EPOCH = 5
     inputsize = 4
-    batchsize = 5
-    hiddensize = 60
+    batchsize = 2
+    hiddensize = 128
     num_layers = 2
     learning_rate = 0.001
     root_dir = '../../forecasting_sample/data/'
 
     data_ = MyData(root_dir)  # 注意这里是一个数据集对象，其中定义了__getitem__方法，调用时才是输出对应的数据
     data_loader = DataLoader(data_, batch_size=batchsize, shuffle=True, collate_fn=collate_fn)
-    net = nn.LSTM(input_size=inputsize, hidden_size=hiddensize, num_layers=num_layers, batch_first=True)
+    net = RNN(inputsize, hiddensize, num_layers)
     criteria = nn.MSELoss()
     optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
 
@@ -84,10 +83,10 @@ if __name__ == '__main__':
     for epoch in range(EPOCH):
         for batch_id, (batch_x, batch_y, batch_x_len) in enumerate(data_loader):
             batch_x_pack = rnn_utils.pack_padded_sequence(batch_x, batch_x_len, batch_first=True)
-            out, (h_n, c_n) = net(batch_x_pack)  # out.data's shape (所有序列总长度, hiddensize)
-            out_pad, out_len = rnn_utils.pad_packed_sequence(out, batch_first=True)
-            loss = criteria(h_n[-1].unsqueeze(-1), batch_y)
-            # optimizer.zero_grad()
+            out = net(batch_x_pack)  # out.data's shape (所有序列总长度, hiddensize)
+            # out_pad, out_len = rnn_utils.pad_packed_sequence(out, batch_first=True)
+            loss = criteria(out, batch_y)
+            optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             print('epoch:{:2d}, batch_id:{:2d}, loss:{:6.4f}'.format(epoch, batch_id, loss))
