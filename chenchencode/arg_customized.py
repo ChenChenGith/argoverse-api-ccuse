@@ -7,6 +7,7 @@ import copy
 from pandas import DataFrame
 import pickle
 import pandas as pd
+import time
 
 
 class find_centerline_veh_coor(object):
@@ -97,63 +98,99 @@ class find_centerline_veh_coor(object):
 
         return re_cl, self.range_box
 
+
 class data_loader_customized(object):
     def __init__(self, file_path):
         self.file_path = file_path
         self.seq_df = pd.read_csv(file_path)
 
-
-    def get_ov_traj(self, track_ID) -> np.array:
+    def get_ov_traj(self, track_ID=None) -> np.array:
         """Get the trajectory for the track_ID in the current sequence.
 
         Returns:
             numpy array of shape (seq_len x 2) for the vehicle trajectory
         """
+        if track_ID == None: track_ID = self.seq_df['TRACK_ID'][0]
         agent_x = self.seq_df[self.seq_df["TRACK_ID"] == track_ID]["X"]
         agent_y = self.seq_df[self.seq_df["TRACK_ID"] == track_ID]["Y"]
         agent_traj = np.column_stack((agent_x, agent_y))
         return agent_traj
 
-    def get_all_traj_for_train(self, know_num=20, agent_first=True) -> (pd.DataFrame, pd.DataFrame):
+    def get_all_traj_for_train(self, know_num=20, agent_first=True, forGCN=False) -> (pd.DataFrame, pd.DataFrame):
         """Get the first (know_num, 2) coordinates of all track_ID in the current sequence for the use of trajectory prediction
         Data of the target track are placed at the first
         Args:
-            know_num: traj data that are known for the prediction
-            agent_first: chose agent as the prediction target, else AV
+            know_num: int, traj data that are known for the prediction
+            agent_first: bool, chose agent as the prediction target, else AV
+            forGCN: if true then the outputted know_data will have standard format for each trackID
         Returns:
-            numpy array of shape (track_num, know_num, 2) for the vehicle trajectory
+            train_data: pd.DataFrame(columns = ['TIMESTAMP', 'TRACK_ID', 'X', 'Y']), n*2
+            pred_data: pd.DataFrame(columns = ['TIMESTAMP', 'X', 'Y']), (50-know_num)*2 ,order is in scending time
         """
         seq_df = copy.deepcopy(self.seq_df[:])  # copy seq_df
         seq_df['TIMESTAMP'] -= seq_df['TIMESTAMP'][0]  # time normalization
         seq_df['TIMESTAMP'] = seq_df['TIMESTAMP'].round(1)
+        # sometimes, the sample frequency > 0.1s, thus need delete the extra data
+        seq_df.drop(seq_df[seq_df['TIMESTAMP'] > 5].index, inplace=True)
         seq_df.sort_values('TIMESTAMP')
+
         know_data = seq_df[seq_df['TIMESTAMP'] < know_num / 10]  # the known data for all tracks
         know_data = know_data.sort_values(['OBJECT_TYPE', 'TRACK_ID'])  # sort by type and id, for the factorize
         know_data['TRACK_ID'] = pd.factorize(know_data['TRACK_ID'])[0]
         know_data = know_data[['TIMESTAMP', 'TRACK_ID', 'X', 'Y']]  # reserve useful data
+
+        if forGCN:
+            num_track = len(know_data['TRACK_ID'].unique())
+            know_data['tmp'] = know_data['TIMESTAMP'] + know_data['TRACK_ID'] * 10
+            standard_df = DataFrame(np.tile(np.linspace(0, (know_num - 1) / 10, know_num), num_track),
+                                    columns=['TIMESTAMP_s']).round(1)
+            standard_df['track_tmp'] = np.arange(num_track).repeat(know_num)
+            standard_df['TIMESTAMP_s'] = standard_df['track_tmp'] * 10 + standard_df['TIMESTAMP_s']
+            standard_know_data = pd.merge(standard_df, know_data, left_on='TIMESTAMP_s', right_on='tmp',
+                                          how='outer')
+            standard_know_data[['TIMESTAMP','TRACK_ID']] = standard_know_data[['TIMESTAMP_s','track_tmp']]
+            know_data = standard_know_data.groupby('TIMESTAMP_s').mean()
+            know_data = know_data[['TIMESTAMP', 'TRACK_ID', 'X', 'Y']]
+
         if not agent_first:  # exchange index of agent and AV
             know_data['TRACK_ID'][:know_num] = 1
             know_data['TRACK_ID'][know_num:know_num * 2] = 0
 
             pre_data = seq_df[(seq_df['TIMESTAMP'] >= know_num / 10) & (seq_df['OBJECT_TYPE'] == 'AGENT')] \
-                [['TIMESTAMP','X', 'Y']]
+                [['TIMESTAMP', 'X', 'Y']]
         else:
             pre_data = seq_df[(seq_df['TIMESTAMP'] >= know_num / 10) & (seq_df['OBJECT_TYPE'] == 'AV')] \
-                [['X', 'Y']]
+                [['TIMESTAMP', 'X', 'Y']]
 
-        return (know_data, pre_data)
+        # there may be same timestamp between two rows, or missing of some timestep, so fill it
+        standard_df = DataFrame(np.linspace(know_num / 10, 4.9, 50 - know_num), columns=['TIMESTAMP']).round(1)
+        standard_pred_data = pd.merge(standard_df, pre_data, left_on='TIMESTAMP', right_on='TIMESTAMP', how='outer')
+        standard_pred_data['TIMESTAMP_1'] = standard_pred_data['TIMESTAMP']
+        standard_pred_data = standard_pred_data.groupby('TIMESTAMP_1').mean()
+
+        return (know_data, standard_pred_data)
 
 
 if __name__ == '__main__':
-    theta = np.pi * 0.75
-    city = 'MIA'
-    x0, y0 = 165, 1647
-    # city = 'PIT'
-    # x0, y0 = 2870, 1530
-    range_dis_front = 50
-    range_dis_back = 3
-    range_dis_side = 5
+    # find local centerline test
 
-    find = find_centerline_veh_coor(x0, y0, theta, city, range_dis_front, range_dis_back, range_dis_side)
-    re_cl = find.find()
-    print(re_cl[0])
+    # theta = np.pi * 0.75
+    # city = 'MIA'
+    # x0, y0 = 165, 1647
+    # # city = 'PIT'
+    # # x0, y0 = 2870, 1530
+    # range_dis_front = 50
+    # range_dis_back = 3
+    # range_dis_side = 5
+    #
+    # find = find_centerline_veh_coor(x0, y0, theta, city, range_dis_front, range_dis_back, range_dis_side)
+    # re_cl = find.find()
+    # print(re_cl[0])
+
+    # data loader test
+    pd.set_option('max_rows', 300)
+    file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\16.csv'
+    fdlc = data_loader_customized(file_path)
+    kd, pda = fdlc.get_all_traj_for_train(forGCN=True)
+    print(kd)
+    print('===', pda)
