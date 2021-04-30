@@ -8,6 +8,7 @@ from pandas import DataFrame
 import pickle
 import pandas as pd
 import time
+import torch
 
 
 class find_centerline_veh_coor(object):
@@ -125,7 +126,7 @@ class data_loader_customized(object):
             forGCN: if true then the outputted know_data will have standard format for each trackID
         Returns:
             train_data: pd.DataFrame(columns = ['TIMESTAMP', 'TRACK_ID', 'X', 'Y']), n*2
-            pred_data: pd.DataFrame(columns = ['TIMESTAMP', 'X', 'Y']), (50-know_num)*2 ,order is in scending time
+            label_data: pd.DataFrame(columns = ['TIMESTAMP', 'X', 'Y']), (50-know_num)*2 ,order is in scending time
         """
         seq_df = copy.deepcopy(self.seq_df[:])  # copy seq_df
         seq_df['TIMESTAMP'] -= seq_df['TIMESTAMP'][0]  # time normalization
@@ -148,27 +149,40 @@ class data_loader_customized(object):
             standard_df['TIMESTAMP_s'] = standard_df['track_tmp'] * 10 + standard_df['TIMESTAMP_s']
             standard_know_data = pd.merge(standard_df, know_data, left_on='TIMESTAMP_s', right_on='tmp',
                                           how='outer')
-            standard_know_data[['TIMESTAMP','TRACK_ID']] = standard_know_data[['TIMESTAMP_s','track_tmp']]
+            standard_know_data[['TIMESTAMP', 'TRACK_ID']] = standard_know_data[['TIMESTAMP_s', 'track_tmp']]
             know_data = standard_know_data.groupby('TIMESTAMP_s').mean()
             know_data = know_data[['TIMESTAMP', 'TRACK_ID', 'X', 'Y']]
+            know_data['TIMESTAMP'] = know_data['TIMESTAMP'] - know_data['TRACK_ID'] * 10
 
         if not agent_first:  # exchange index of agent and AV
             know_data['TRACK_ID'][:know_num] = 1
             know_data['TRACK_ID'][know_num:know_num * 2] = 0
 
-            pre_data = seq_df[(seq_df['TIMESTAMP'] >= know_num / 10) & (seq_df['OBJECT_TYPE'] == 'AGENT')] \
+            label_data = seq_df[(seq_df['TIMESTAMP'] >= know_num / 10) & (seq_df['OBJECT_TYPE'] == 'AGENT')] \
                 [['TIMESTAMP', 'X', 'Y']]
         else:
-            pre_data = seq_df[(seq_df['TIMESTAMP'] >= know_num / 10) & (seq_df['OBJECT_TYPE'] == 'AV')] \
+            label_data = seq_df[(seq_df['TIMESTAMP'] >= know_num / 10) & (seq_df['OBJECT_TYPE'] == 'AV')] \
                 [['TIMESTAMP', 'X', 'Y']]
 
         # there may be same timestamp between two rows, or missing of some timestep, so fill it
         standard_df = DataFrame(np.linspace(know_num / 10, 4.9, 50 - know_num), columns=['TIMESTAMP']).round(1)
-        standard_pred_data = pd.merge(standard_df, pre_data, left_on='TIMESTAMP', right_on='TIMESTAMP', how='outer')
-        standard_pred_data['TIMESTAMP_1'] = standard_pred_data['TIMESTAMP']
-        standard_pred_data = standard_pred_data.groupby('TIMESTAMP_1').mean()
+        standard_label_data = pd.merge(standard_df, label_data, left_on='TIMESTAMP', right_on='TIMESTAMP', how='outer')
+        standard_label_data['TIMESTAMP_1'] = standard_label_data['TIMESTAMP']
+        standard_label_data = standard_label_data.groupby('TIMESTAMP_1').mean()
 
-        return (know_data, standard_pred_data)
+        return (know_data, standard_label_data)
+
+
+class torch_treat(object):
+    def __init__(self):
+        pass
+
+    def label_tensor_treat(self, pred_data, label):
+        '''
+        used for the adjustment of label data, when label data have nan
+        '''
+        treated_label = torch.where(torch.isnan(label), pred_data, label)
+        return treated_label
 
 
 if __name__ == '__main__':
@@ -187,10 +201,12 @@ if __name__ == '__main__':
     # re_cl = find.find()
     # print(re_cl[0])
 
+    # pd.set_option('max_colwidth', 200)
+
     # data loader test
     pd.set_option('max_rows', 300)
     file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\16.csv'
     fdlc = data_loader_customized(file_path)
     kd, pda = fdlc.get_all_traj_for_train(forGCN=True)
     print(kd)
-    print('===', pda)
+    print('=== \n', pda)

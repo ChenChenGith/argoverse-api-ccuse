@@ -1,43 +1,56 @@
-from chenchencode.arg_customized import find_centerline_veh_coor
+import torch
 import pandas as pd
 import numpy as np
 from pandas import DataFrame
-import matplotlib.pyplot as plt
 
-path = r'e:\argoverse-api-ccuse\forecasting_sample\data\15.csv'
-data = pd.read_csv(path)
-data = data.sort_values(by=['OBJECT_TYPE', 'TRACK_ID'])
-data['TIMESTAMP'] -= data['TIMESTAMP'][0]
-data['TIMESTAMP'] = data['TIMESTAMP'].round(1)
-data.index = range(data.shape[0])
-data.reset_index(drop=True)
+x = DataFrame([[0.2, 0.3],
+               [0.9, 0.8],
+               [0.4, 0.7],
+               [0.6, 0.7],
+               [0.7, 0.3]])
+y = DataFrame([[1.0, 0.2],
+               [0.6, 0.2],
+               [0.2, 0.4],
+               [0.7, 0.3],
+               [0.2, 0.6]])
+x_ts = torch.tensor(np.array(x))
+y_ts = torch.tensor(np.array(y))
+z = pd.merge(x, y, left_on=0, right_on=0, how='outer')
+z = z[['1_x', '1_y']]
+print(x, '\n', y)
+print(z)
+m = torch.tensor(np.array(z))
+n = torch.tensor(np.array([[0.1, 0.3],
+                           [0.2, 0.8],
+                           [0.9, 96],
+                           [0.5, 97],
+                           [0.6, 0.2],
+                           [0.8, 0.1],
+                           [99, 0.6]]))
+print(m)
+print(n)
+criteria = torch.nn.MSELoss()
+l = criteria(n, m)
+print(l)
 
-x0, y0, x1, y1 = data['X'][0], data['Y'][0], data['X'][1], data['Y'][1]
-print(x0, y0, x1, y1, np.arctan2(y1 - y0, x1 - x0) / np.pi * 180)
-f = find_centerline_veh_coor(x0, y0, np.arctan2(y1 - y0, x1 - x0), 'MIA', 100, 100, 30)
-re_cl, range_box = f.find()
-# print(DataFrame(re_cl[0]))
+print(n[torch.where(torch.isnan(m))])
+p = torch.where(torch.isnan(m), n, m)
+print(p)
+q = torch.where(torch.isnan(m), torch.full_like(m, 0), m)
+print(q)
 
-plt.figure(figsize=(10, 10))
-group = data.groupby('TRACK_ID')
-for gname, gdata in group:
-    c = 'r' if gdata['OBJECT_TYPE'].iloc[0] == 'AGENT' else 'b'
-    #     if i == 67: print(gname)
-    #     plt.plot(gdata['X'].rolling(5).mean(),gdata['Y'].rolling(5).mean(), c=c)
-    plt.plot(gdata['X'], gdata['Y'], c=c)
-    plt.scatter(gdata['X'].iloc[0:2], gdata['Y'].iloc[0:2], c=c)
-    if gdata['OBJECT_TYPE'].iloc[0] == 'AGENT':
-        print(gdata['X'].iloc[0:2], gdata['Y'].iloc[0:2])
-        break
-    plt.text(gdata['X'].iloc[0], gdata['Y'].iloc[0], gname[-5:])
 
-for i in range(len(re_cl)):
-    x = re_cl[i]
-    # display(Polygon(x))
-    re_cl_df = DataFrame(x)
-    plt.plot(re_cl_df[0], re_cl_df[1], linestyle='--', c='gray')
+l = criteria(n, p)
+print(l)
+l = criteria(n, q)
+print(l)
 
-plt.plot(range_box[0], range_box[1])
-plt.axis('equal')
 
-plt.show()
+
+# a = torch.Tensor([[1, 2, np.nan], [3, np.nan, 4], [3, 4, 5]])
+# print(a)
+# b = torch.Tensor([[11, 22, 66], [33, 44, 44], [33, 44, 55]])
+# print(b)
+# c = torch.where(torch.isnan(a), b, a)
+# print(c)
+
