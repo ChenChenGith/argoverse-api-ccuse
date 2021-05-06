@@ -89,16 +89,16 @@ train_data, label_data = fdlc.get_all_traj_for_train(know_num=20, agent_first=Tr
 
 **Output:**
 
-<font color=blue>train_data:</font>
+**1) <font color=blue>train_data:</font>**
 
 <font color=gray>(*i=0,j=1 if agent_first=True else i=1,j=0*)</font>
 
-* If forGCN=**False**:
+ If forGCN=**False**:
 
 | index | TIMESTAMP | TRACK_ID | X    | Y    |    |  describe<br>(not in data)  |
 |:----: |:----:     |:----:    |:----:|:----:|----|----|
 |  1    | 0.1       |   i      |   $$x_0$$ |  y0  | <- | Agent data start|
-|  2    | 0.3       |   i      |   x1 |  y1  |    <-|<font color=red>note TIMESTAMP=0.2 is missing</font> |
+|  2    | 0.3       |   i      |   x1 |  y1  |    <-|**<font color=red>note TIMESTAMP=0.2 is missing</font>** |
 |...|...|...|...|...| | |
 |  n=know_num    | 1.9       |   i      |   xn |  yn  | <- | Agent data end|
 |  n+1  | 0.1       |   j      | xn1  | yn1  | <- | AV data start|
@@ -119,7 +119,7 @@ Example:
 | index | TIMESTAMP | TRACK_ID | X    | Y    |    |  describe<br>(not in data)  |
 |:----: |:----:     |:----:    |:----:|:----:|----|----|
 |  1    | 0.1       |   i      |   $$x_0$$ |  y0  | <- | Agent data start|
-|  2    | 0.2       |   i      |   NaN |  NaN  |  <-|<font color=red>note data of TIMESTAMP=0.2 is added using NaN</font> |
+|  2    | 0.2       |   i      |   NaN |  NaN  |  <-|**<font color=red>note data of TIMESTAMP=0.2 is added using NaN</font>** |
 |  2    | 0.3       |   i      |   x1 |  y1  |    | |
 |...|...|...|...|...| | |
 |  n    | 1.9       |   i      |   xn |  yn  | <- | Agent data end|
@@ -136,7 +136,7 @@ Example:
 
 ![](images/data_loader_customized_True.png)
 
-<font color=blue>label_data:</font>
+**2) <font color=blue>label_data:</font>**
 
 | index | TIMESTAMP |  X    | Y    |    |  describe<br>(not in data)  |
 |:----: |:----:     |:----:|:----:|----|----|
@@ -165,11 +165,14 @@ In '../chenchencode/arg_customized'* ([Codes](chenchencode/arg_customized.py))
 
 ``` python
 from chenchencode.arg_customized import torch_treat
-torch_treat = torch_treat().label_tensor_treat(pred_data,label_data) -> label data
+treated_label = torch_treat().label_tensor_treat(pred_data,label_data) -> label data
 ```
 **Output:**
 
 example:
 
 ![](images/tensor_treat.png)
+
+<img src="images/tensor_treat.png" width="200">
+
 
