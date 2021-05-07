@@ -138,7 +138,7 @@ class data_loader_customized(object):
             train_data: pd.DataFrame(columns = ['TIMESTAMP', 'TRACK_ID', 'X', 'Y']), n*2
             label_data: pd.DataFrame(columns = ['TIMESTAMP', 'X', 'Y']), (50-know_num)*2 ,order is in scending time
         """
-        if normalization: relative=True
+        if normalization: relative = True
 
         seq_df = copy.deepcopy(self.seq_df[:])  # copy seq_df
         seq_df['TIMESTAMP'] -= seq_df['TIMESTAMP'][0]  # time normalization
@@ -206,13 +206,21 @@ class data_loader_customized(object):
     def get_main_dirction(self, use_point=4, agent_first=True):
         """
         using the first point ant the use_point'th point coordinates to calculate the angle
+        Args:
+            use_point: the i-th point that used for the angle calculation
+            agent_first: if true, data of agent vehicle will be used: should be the same as that in get_all_traj_for_train
+        Returns:
+            x0, y0: the initial coordinate, for the surrounding centerline extraction
+            angle: the over all angle, for the surrounding centerline extraction
+            city: city name
         """
+        city = self.seq_df['CITY_NAME'].iloc[0]
         seq_df = copy.deepcopy(self.seq_df[:])  # copy seq_df
         veh_type = 'AGENT' if agent_first else 'AV'
         seq_df = seq_df[seq_df['OBJECT_TYPE'] == veh_type].sort_values('TIMESTAMP').reset_index(drop=True)
         x0, y0, x1, y1 = seq_df['X'][0], seq_df['Y'][0], seq_df['X'][use_point], seq_df['Y'][use_point]
 
-        return np.arctan2(y1 - y0, x1 - x0) / np.pi * 180
+        return (x0, y0, np.arctan2(y1 - y0, x1 - x0), city)
 
 
 class torch_treat(object):
@@ -234,6 +242,8 @@ class torch_treat(object):
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
+
+    # ===================================================
     # find local centerline test
 
     # theta = np.pi * 0.75
@@ -251,22 +261,39 @@ if __name__ == '__main__':
 
     # pd.set_option('max_colwidth', 200)
 
+    # ===================================================
     # data loader test
     pd.set_option('max_rows', 300)
-    file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\12.csv'
+    file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\22.csv'
     fdlc = data_loader_customized(file_path)
     kd, pda = fdlc.get_all_traj_for_train(forGCN=False, normalization=False)
     g = kd.groupby('TRACK_ID')
     for name, data in g:
-        c = 'gray' if name!=0 else 'red'
-        plt.plot(data['X'],data['Y'],c=c)
-    plt.scatter(pda['X'],pda['Y'],c='blue',s=10)
+        c = 'gray' if name != 0 else 'red'
+        plt.plot(data['X'], data['Y'], c=c)
+    pda = pda.fillna(method='ffill')
+    pda = pda.fillna(method='backfill')
+    plt.plot(pda['X'], pda['Y'], c='blue')
     dataq = pd.read_csv(file_path)
     g = dataq.groupby('TRACK_ID')
     for name, data in g:
-        if data['OBJECT_TYPE'].iloc[0]=='AGENT': continue
-        plt.scatter(data['X'].iloc[0]+0.5, data['Y'].iloc[0]+0.5,marker='x')
-        plt.plot(data['X']+0.5, data['Y']+0.5,linestyle=':')
-    dataq = dataq[dataq['OBJECT_TYPE']=='AGENT']
-    plt.scatter(dataq['X'], dataq['Y'], marker='o',c='',edgecolors='g',s=30)
+        if data['OBJECT_TYPE'].iloc[0] == 'AGENT': continue
+        plt.scatter(data['X'].iloc[0] + 0.5, data['Y'].iloc[0] + 0.5, marker='x', s=15, c='seagreen')
+        plt.plot(data['X'] + 0.5, data['Y'] + 0.5, linestyle=':')
+    dataq = dataq[dataq['OBJECT_TYPE'] == 'AGENT']
+    plt.scatter(dataq['X'], dataq['Y'], marker='o', c='', edgecolors='g', s=30)
+
+    # ===================================================
+    # get trajectory direction
+    x0, y0, angle, city = fdlc.get_main_dirction()
+    print(x0, y0, angle, city)
+    find = find_centerline_veh_coor(x0, y0, angle, city)
+    re_cl, range_box = find.find()
+    for i in range(len(re_cl)):
+        x = re_cl[i]
+        # display(Polygon(x))
+        re_cl_df = DataFrame(x)
+        plt.plot(re_cl_df[0], re_cl_df[1], linestyle='-.', c='lightcoral', linewidth=0.4)
+    plt.plot(range_box[0], range_box[1], c='crimson', linestyle='--')
+    plt.axis('equal')
     plt.show()

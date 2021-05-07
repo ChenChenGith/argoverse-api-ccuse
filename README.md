@@ -185,8 +185,15 @@ trajectory.
 **Use:**
 ``` python
 from chenchencode.arg_customized import data_loader_customized
+# Args:
+#     use_point: the i-th point that used for the angle calculation
+#     agent_first: if true, data of agent vehicle will be used: should be the same as that in get_all_traj_for_train
+# Returns:
+#     x0, y0: the initial coordinate, for the surrounding centerline extraction
+#     angle: the over all angle, for the surrounding centerline extraction
+#     city: city name
 fdlc = data_loader_customized(file_path)
-angle = get_main_dirction(use_point=4, agent_first=True) ->angle (rad in [-pi, pi])
+x0, y0, angle, city = get_main_dirction(use_point=4, agent_first=True) ->angle (rad in [-pi, pi])
 ```
 
 #### 2.4 Making the most of data when a *.csv file contains more than 5 seconds data (TODO...)
@@ -210,19 +217,17 @@ In *'../chenchencode/arg_customized'* ([Codes](chenchencode/arg_customized.py))
 
 ``` python
 from chenchencode.arg_customized import torch_treat
-#    Args:
-#        pred_data: tensor(n,2), predicted trajectory coordinates from you algorithm
-#        label: tensor(m,2), label trajectory coordinates that may contains NaN
-#    Returns:
-#        treated_label: tensor(m,2), label trajectory without NaN
+# Args:
+#     pred_data: tensor(n,2), predicted trajectory coordinates from you algorithm
+#     label: tensor(m,2), label trajectory coordinates that may contains NaN
+# Returns:
+#     treated_label: tensor(m,2), label trajectory without NaN
 treated_label = torch_treat().label_tensor_treat(pred_data,label_data) -> label data (tensor)
 ```
 
 **Output:**
 
 example:
-
-![](images/tensor_treat.png)
 
 <img src="images/tensor_treat.png" width="500">
 
