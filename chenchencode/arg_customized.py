@@ -12,7 +12,7 @@ import torch
 
 
 class find_centerline_veh_coor(object):
-    def __init__(self, x0, y0, theta, city, range_front, range_back, range_side, save_path=''):
+    def __init__(self, x0, y0, theta, city, range_front=80, range_back=20, range_side=30, save_path=''):
         '''
 
         Args:
@@ -117,17 +117,29 @@ class data_loader_customized(object):
         agent_traj = np.column_stack((agent_x, agent_y))
         return agent_traj
 
-    def get_all_traj_for_train(self, know_num=20, agent_first=True, forGCN=False) -> (pd.DataFrame, pd.DataFrame):
+    def get_all_traj_for_train(self,
+                               know_num=20,
+                               agent_first=True,
+                               forGCN=False,
+                               relative=False,
+                               normalization=False,
+                               norm_range=100) -> (pd.DataFrame, pd.DataFrame):
         """Get the first (know_num, 2) coordinates of all track_ID in the current sequence for the use of trajectory prediction
         Data of the target track are placed at the first
         Args:
             know_num: int, traj data that are known for the prediction
             agent_first: bool, chose agent as the prediction target, else AV
             forGCN: if true then the outputted know_data will have standard format for each trackID
+            relative: if true, the coordinates in both train and label data will be mapped to relative values with the start point of agent/AV
+            normalization: if true, the raw coordinates will be normalized to nearly [0,1] using the norm_range
+                           note: when normalization=True, relative will be assign to be True.
+            norm_range: used for the normalization. points whose distance between the first point of agent/AV is equal to norm_range, then it will map to 1
         Returns:
             train_data: pd.DataFrame(columns = ['TIMESTAMP', 'TRACK_ID', 'X', 'Y']), n*2
             label_data: pd.DataFrame(columns = ['TIMESTAMP', 'X', 'Y']), (50-know_num)*2 ,order is in scending time
         """
+        if normalization: relative=True
+
         seq_df = copy.deepcopy(self.seq_df[:])  # copy seq_df
         seq_df['TIMESTAMP'] -= seq_df['TIMESTAMP'][0]  # time normalization
         seq_df['TIMESTAMP'] = seq_df['TIMESTAMP'].round(1)
@@ -155,14 +167,29 @@ class data_loader_customized(object):
             know_data['TIMESTAMP'] = know_data['TIMESTAMP'] - know_data['TRACK_ID'] * 10
 
         if not agent_first:  # exchange index of agent and AV
-            know_data['TRACK_ID'][:know_num] = 1
-            know_data['TRACK_ID'][know_num:know_num * 2] = 0
+            know_data['TRACK_ID'].iloc[:know_num] = 1
+            know_data['TRACK_ID'].iloc[know_num:know_num * 2] = 0
 
-            label_data = seq_df[(seq_df['TIMESTAMP'] >= know_num / 10) & (seq_df['OBJECT_TYPE'] == 'AGENT')] \
-                [['TIMESTAMP', 'X', 'Y']]
-        else:
             label_data = seq_df[(seq_df['TIMESTAMP'] >= know_num / 10) & (seq_df['OBJECT_TYPE'] == 'AV')] \
                 [['TIMESTAMP', 'X', 'Y']]
+
+            if relative:  # map the original data to relative values
+                x0, y0 = know_data['X'].iloc[know_num], know_data['Y'].iloc[know_num]
+                know_data['X'] -= x0
+                know_data['Y'] -= y0
+                label_data['X'] -= x0
+                label_data['Y'] -= y0
+
+        else:
+            label_data = seq_df[(seq_df['TIMESTAMP'] >= know_num / 10) & (seq_df['OBJECT_TYPE'] == 'AGENT')] \
+                [['TIMESTAMP', 'X', 'Y']]
+
+            if relative:  # map the original data to relative values
+                x0, y0 = know_data['X'].iloc[0], know_data['Y'].iloc[0]
+                know_data['X'] -= x0
+                know_data['Y'] -= y0
+                label_data['X'] -= x0
+                label_data['Y'] -= y0
 
         # there may be same timestamp between two rows, or missing of some timestep, so fill it
         standard_df = DataFrame(np.linspace(know_num / 10, 4.9, 50 - know_num), columns=['TIMESTAMP']).round(1)
@@ -170,23 +197,43 @@ class data_loader_customized(object):
         standard_label_data['TIMESTAMP_1'] = standard_label_data['TIMESTAMP']
         standard_label_data = standard_label_data.groupby('TIMESTAMP_1').mean()
 
+        if normalization:  # normalizing the raw coordinates
+            know_data[['X', 'Y']] = know_data[['X', 'Y']] / norm_range
+            standard_label_data[['X', 'Y']] = standard_label_data[['X', 'Y']] / norm_range
+
         return (know_data, standard_label_data)
 
+    def get_main_dirction(self, use_point=4, agent_first=True):
+        """
+        using the first point ant the use_point'th point coordinates to calculate the angle
+        """
+        seq_df = copy.deepcopy(self.seq_df[:])  # copy seq_df
+        veh_type = 'AGENT' if agent_first else 'AV'
+        seq_df = seq_df[seq_df['OBJECT_TYPE'] == veh_type].sort_values('TIMESTAMP').reset_index(drop=True)
+        x0, y0, x1, y1 = seq_df['X'][0], seq_df['Y'][0], seq_df['X'][use_point], seq_df['Y'][use_point]
+
+        return np.arctan2(y1 - y0, x1 - x0) / np.pi * 180
 
 
 class torch_treat(object):
     def __init__(self):
         pass
 
-    def label_tensor_treat(self, pred_data, label):
+    def label_tensor_treat(self, pred_data, label) -> torch.tensor:
         '''
         used for the adjustment of label data, when label data have nan
+        Args:
+            pred_data: tensor(n,2), predicted trajectory coordinates from you algorithm
+            label: tensor(m,2), label trajectory coordinates that may contains NaN
+        Returns:
+            treated_label: tensor(m,2), label trajectory without NaN
         '''
         treated_label = torch.where(torch.isnan(label), pred_data, label)
         return treated_label
 
 
 if __name__ == '__main__':
+    import matplotlib.pyplot as plt
     # find local centerline test
 
     # theta = np.pi * 0.75
@@ -206,8 +253,20 @@ if __name__ == '__main__':
 
     # data loader test
     pd.set_option('max_rows', 300)
-    file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\16.csv'
+    file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\12.csv'
     fdlc = data_loader_customized(file_path)
-    kd, pda = fdlc.get_all_traj_for_train(forGCN=True)
-    print(kd)
-    print('=== \n', pda)
+    kd, pda = fdlc.get_all_traj_for_train(forGCN=False, normalization=False)
+    g = kd.groupby('TRACK_ID')
+    for name, data in g:
+        c = 'gray' if name!=0 else 'red'
+        plt.plot(data['X'],data['Y'],c=c)
+    plt.scatter(pda['X'],pda['Y'],c='blue',s=10)
+    dataq = pd.read_csv(file_path)
+    g = dataq.groupby('TRACK_ID')
+    for name, data in g:
+        if data['OBJECT_TYPE'].iloc[0]=='AGENT': continue
+        plt.scatter(data['X'].iloc[0]+0.5, data['Y'].iloc[0]+0.5,marker='x')
+        plt.plot(data['X']+0.5, data['Y']+0.5,linestyle=':')
+    dataq = dataq[dataq['OBJECT_TYPE']=='AGENT']
+    plt.scatter(dataq['X'], dataq['Y'], marker='o',c='',edgecolors='g',s=30)
+    plt.show()
