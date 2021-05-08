@@ -215,7 +215,7 @@ In *'../chenchencode/arg_customized'* ([Codes](chenchencode/arg_customized.py))
 ``` python
 from chenchencode.arg_customized import torch_treat
 # Args:
-#     pred_data: tensor(n,2), predicted trajectory coordinates from you algorithm
+#     pred_data: tensor(n,2), predicted trajectory coordinates from your algorithm
 #     label: tensor(m,2), label trajectory coordinates that may contains NaN
 # Returns:
 #     treated_label: tensor(m,2), label trajectory without NaN
@@ -227,4 +227,3 @@ treated_label = torch_treat().label_tensor_treat(pred_data,label_data) -> label 
 example:
 
 <img src="images/tensor_treat.png" width="500">
-

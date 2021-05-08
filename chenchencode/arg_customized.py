@@ -11,7 +11,8 @@ import torch
 
 
 class find_centerline_veh_coor(object):
-    def __init__(self, x0, y0, theta, city, range_front=80, range_back=20, range_side=30, range_sta=False, save_path=''):
+    def __init__(self, x0, y0, theta, city, range_front=80, range_back=20, range_side=30, range_sta=False,
+                 save_path=''):
         '''
         Args:
             x0: float, vehicle coordinate
@@ -256,15 +257,19 @@ class torch_treat(object):
     def __init__(self):
         pass
 
-    def label_tensor_treat(self, pred_data, label) -> torch.tensor:
+    def label_tensor_treat(self, pred_data, label, denorm=True, norm_range=100) -> torch.tensor:
         '''
         used for the adjustment of label data, when label data have nan
         Args:
-            pred_data: tensor(n,2), predicted trajectory coordinates from you algorithm
+            pred_data: tensor(n,2), predicted trajectory coordinates from your algorithm
             label: tensor(m,2), label trajectory coordinates that may contains NaN
+            denorm: if true, predicted trajectory data will be denormalized using norm_range
+            norm_range: range used in the normalization when extract training data
         Returns:
             treated_label: tensor(m,2), label trajectory without NaN
         '''
+        if denorm:
+            label = label / norm_range
         treated_label = torch.where(torch.isnan(label), pred_data, label)
         return treated_label
 

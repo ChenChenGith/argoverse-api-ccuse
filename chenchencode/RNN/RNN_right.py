@@ -159,8 +159,8 @@ def run_train_lstm():
 
         if e % 64 == 0:
             print('Epoch: {:4}, Loss: {:.5f}'.format(e, loss.item()))
-    torch.save(net.state_dict(), '{}/net.pth'.format(mod_dir))
-    print("Save in:", '{}/net.pth'.format(mod_dir))
+    # torch.save(net.state_dict(), '{}/net.pth'.format(mod_dir))
+    # print("Save in:", '{}/net.pth'.format(mod_dir))
 
     '''eval'''
     net.load_state_dict(torch.load('{}/net.pth'.format(mod_dir), map_location=lambda storage, loc: storage))
@@ -197,7 +197,7 @@ def run_train_lstm():
     plt.plot([train_size, train_size], [-1, 2], color='k', label='train | pred')
     plt.legend(loc='best')
     plt.savefig('lstm_reg.png')
-    plt.pause(4)
+    plt.show()
 
 
 def run_origin():
