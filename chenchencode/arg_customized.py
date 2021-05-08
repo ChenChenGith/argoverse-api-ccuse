@@ -22,6 +22,9 @@ class find_centerline_veh_coor(object):
             range_back: float, search range in the back of the vehicle
             range_sta: if true, means that the vehicle is amost stationary, all the range value will be set to 20
             save_path: str, path to save the rebuilt centerline in Shaple format
+        Returns:
+            surr_centerline: np.array(m,m,3), the surrounding centerline coordinates
+            range_box: np.array(4,3), the range box coordinates
         '''
         self.x0, self.y0, self.theta = x0, y0, theta
         if not range_sta:
@@ -298,8 +301,7 @@ if __name__ == '__main__':
     # get trajectory direction
     x0, y0, angle, city, square_range = fdlc.get_main_dirction(agent_first=True)
     print(square_range)
-    find = find_centerline_veh_coor(x0, y0, angle, city, range_sta=square_range)
-    re_cl, range_box = find.find()
+    re_cl, range_box = find_centerline_veh_coor(x0, y0, angle, city, range_sta=square_range).find()
     for i in range(len(re_cl)):
         x = re_cl[i]
         # display(Polygon(x))

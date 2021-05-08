@@ -31,8 +31,11 @@ from chenchencode.arg_customized import find_centerline_veh_coor
 #     range_front: float, search range in front of the vehicle
 #     range_back: float, search range in the back of the vehicle
 #     range_sta: if true, means that the vehicle is amost stationary, all the range value will be set to 20
-f = find_centerline_veh_coor(x0, y0, theta, city, range_front=80, range_back=20, range_side=30, range_sta=False)
-surr_centerline = f.find()  # -> np.array(n,m,3)
+# Returns:
+#     surr_centerline: np.array(m,m,3), the surrounding centerline coordinates
+#     range_box: np.array(4,3), the range box coordinates
+find = find_centerline_veh_coor(x0, y0, theta, city, range_front=80, range_back=20, range_side=30, range_sta=False)
+surr_centerline, range_box = find.find() -> np.array(n,m,3), np.array(4,2)
 ```
 
 **output:**
@@ -91,7 +94,7 @@ from chenchencode.arg_customized import data_loader_customized
                      note: when normalization=True, relative will be assign to be True.
 #     norm_range: used for the normalization. points whose distance between the first point of agent/AV is equal to norm_range, then it will map to 1  
 #     range_const: if true, only the coordinates in the range_box are extracted
-#     range_box: the four point of the range              
+#     range_box: the four point of the range, can get from function (find_centerline_veh_coor)              
 # Returns:
 #     train_data: pd.DataFrame(columns = ['TIMESTAMP', 'TRACK_ID', 'X', 'Y']), n*2
 #     label_data: pd.DataFrame(columns = ['TIMESTAMP', 'X', 'Y']), (50-know_num)*2 ,order is in scending time
