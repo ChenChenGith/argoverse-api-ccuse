@@ -3,21 +3,6 @@
 Customed code for my study use
 > Original repository see [Argoverse api](https://github.com/argoai/argoverse-api)
 
-- [Argoverse API - ChenChen customed](#argoverse-api---chenchen-customed)
-  * [Changes for trajectory prediction](#changes-for-trajectory-prediction)
-    + [1. Maps](#1-maps)
-      - [1.1 Find surrounding centerline according to vehicle heading angle](#11-find-surrounding-centerline-according-to-vehicle-heading-angle)
-    + [2. Data loader customized](#2-data-loader-customized)
-      - [2.1 Get other vehicle data from forecasting data](#21-get-other-vehicle-data-from-forecasting-data)
-      - [2.2 Get training data from a sequence (a *.csv file)](#22-get-training-data-from-a-sequence-a-csv-file)
-      - [2.3 Get the trajectory direction (for the surrounding centerline finding)](#23-get-the-trajectory-direction-for-the-surrounding-centerline-finding)
-      - [2.4 Making the most of data when a *.csv file contains more than 5 seconds data (TODO...)](#24-making-the-most-of-data-when-a-csv-file-contains-more-than-5-seconds-data-todo)
-      - [2.5 Filter to extract surrounding vehicles' trajectory according to ego vehicle heading angle (TODO...)](#25-filter-to-extract-surrounding-vehicles-trajectory-according-to-ego-vehicle-heading-angle-todo)
-    + [3. For Tensor training](#3-for-tensor-training)
-      - [3.1 Treat on label data](#31-treat-on-label-data)
-
-<small><i><a href='http://ecotrust-canada.github.io/markdown-toc/'>Table of contents generated with markdown-toc</a></i></small>
-
 ## Changes for trajectory prediction
 
 ### 1. Maps
@@ -38,8 +23,15 @@ Codes can be found [Here](chenchencode/arg_customized.py)
 
 ``` python
 from chenchencode.arg_customized import find_centerline_veh_coor
-
-f = find_centerline_veh_coor(x0, y0, theta, city, range_dis_front, range_dis_back, range_dis_side)
+# Args:
+#     x0: float, vehicle coordinate
+#     y0: float, vehicle coordinate
+#     theta: float, vehicle heading angle, in radian
+#     city: str, city name, 'PIT' or 'MIA'
+#     range_front: float, search range in front of the vehicle
+#     range_back: float, search range in the back of the vehicle
+#     range_sta: if true, means that the vehicle is amost stationary, all the range value will be set to 20
+f = find_centerline_veh_coor(x0, y0, theta, city, range_front=80, range_back=20, range_side=30, range_sta=False)
 surr_centerline = f.find()  # -> np.array(n,m,3)
 ```
 
@@ -97,7 +89,9 @@ from chenchencode.arg_customized import data_loader_customized
 #     relative: if true, the coordinates in both train and label data will be mapped to relative values with the start point of agent/AV
 #     normalization: if true, the raw coordinates will be normalized to nearly [0,1] using the norm_range
                      note: when normalization=True, relative will be assign to be True.
-#     norm_range: used for the normalization. points whose distance between the first point of agent/AV is equal to norm_range, then it will map to 1                
+#     norm_range: used for the normalization. points whose distance between the first point of agent/AV is equal to norm_range, then it will map to 1  
+#     range_const: if true, only the coordinates in the range_box are extracted
+#     range_box: the four point of the range              
 # Returns:
 #     train_data: pd.DataFrame(columns = ['TIMESTAMP', 'TRACK_ID', 'X', 'Y']), n*2
 #     label_data: pd.DataFrame(columns = ['TIMESTAMP', 'X', 'Y']), (50-know_num)*2 ,order is in scending time
@@ -108,7 +102,9 @@ train_data, label_data = fdlc.get_all_traj_for_train(know_num=20,
                                                      forGCN=False, 
                                                      relative=False, 
                                                      normalization=False, 
-                                                     norm_range=100)
+                                                     norm_range=100
+                                                     range_const=False,
+                                                     range_box=None)
 ```
 
 **Output:**
@@ -143,7 +139,7 @@ Example:
 | index | TIMESTAMP | TRACK_ID | X    | Y    |    |  Description<br>(not in data)  |
 |:----: |:----:     |:----:    |:----:|:----:|----|----|
 |  1    | 0.1       |   i      |   x0 |  y0  | <- | Agent data start|
-|  2    | 0.2       |   i      |   NaN |  NaN  |  <-|**<font color=red>note data of TIMESTAMP=0.2 is added using
+|  2    | 0.2       |   i      |   NaN |  NaN  |  <-|**<font color=red>note data of TIMESTAMP=0.2 is added using NaN**
 NaN</font>** |
 |  2    | 0.3       |   i      |   x1 |  y1  |    | |
 |...|...|...|...|...| | |
@@ -183,6 +179,7 @@ Due to the data noise, or the initial fluctuation, vehicle angle using the first
 trajectory.
 
 **Use:**
+
 ``` python
 from chenchencode.arg_customized import data_loader_customized
 # Args:
@@ -192,15 +189,12 @@ from chenchencode.arg_customized import data_loader_customized
 #     x0, y0: the initial coordinate, for the surrounding centerline extraction
 #     angle: the over all angle, for the surrounding centerline extraction
 #     city: city name
+#     square_range: When vehicle is amost stationary, it's True, so suggest range_sta=True in finding surrounding centerline
 fdlc = data_loader_customized(file_path)
-x0, y0, angle, city = get_main_dirction(use_point=4, agent_first=True) ->angle (rad in [-pi, pi])
+x0, y0, angle, city, range_advice = get_main_dirction(self, use_point=10, agent_first=True) ->angle (rad in [-pi, pi])
 ```
 
 #### 2.4 Making the most of data when a *.csv file contains more than 5 seconds data (TODO...)
-
-#### 2.5 Filter to extract surrounding vehicles' trajectory according to ego vehicle heading angle (TODO...)
-
-like [1.1](####1.1) 
 
 ### 3. For Tensor training
 
