@@ -1,106 +1,158 @@
 # loader for the prediction
+# import os
+# os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+
+import torch
+import torch.utils.data as data_
+from torch.utils.data import DataLoader
+import torch.nn.utils.rnn as rnn_utlils
+from torch import nn
+from chenchencode.arg_customized import data_loader_customized
+from chenchencode.arg_customized import torch_treat
 import os
 
-os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 
-import numpy as np
-import torch.nn.utils.rnn as rnn_utils
-import torch
-from torch import nn
-from torch.utils.data import DataLoader
-from chenchencode.arg_customized import find_centerline_veh_coor
-from argoverse.data_loading.argoverse_forecasting_loader import ArgoverseForecastingLoader
+class Data_read(data_.Dataset):
+    '''
+    用于构造原始数据集的一个类。
+    被dataloader调用时，会自动调用__getitem__方法，根据batch的大小，共调用batch_size次，将返回的数据送入collate_fn进一步处理成为可以直接输入到网络中的格式
 
-import torch.utils.data as data_
+    在本轨迹预测中，因为读取csv数据的方法被封装到了chenchencode.arg_customized.data_loader_customized中，所以传入的是csv file list
+    由__getitem__调用此方法来返回数据
+    '''
 
-
-class MyData(data_.Dataset):
-    def __init__(self, data_dir_path):
-        self.afl = ArgoverseForecastingLoader(data_dir_path)  # loader对象
+    def __init__(self, file_path_list):
+        self.file_path_list = file_path_list
 
     def __len__(self):
-        return len(self.afl)
+        return len(self.file_path_list)
 
     def __getitem__(self, idx):
-        train_data, pred_data = self.afl[idx].get_all_traj_for_train()
-        tuple_ = (
-        torch.FloatTensor(np.array(train_data)), torch.FloatTensor(np.array(pred_data.iloc[:30, :]).reshape(-1)))
-        return tuple_
+        data_reader = data_loader_customized(self.file_path_list[idx])
+        raw_data = data_reader.get_all_traj_for_train(return_type='tensor',
+                                                      normalization=True, )  # TODO:后期需要根据网络形式来更改该函数参数
+        return raw_data
 
 
-def collate_fn(data_tuple):  # data_tuple是一个列表，列表中包含batchsize个元组，每个元组中包含数据和标签
-    data_tuple.sort(key=lambda x: len(x[0]), reverse=True)
-    data = [sq[0] for sq in data_tuple]
-    label = [sq[1] for sq in data_tuple]
-    data_length = [len(sq) for sq in data]
-    data = rnn_utils.pad_sequence(data, batch_first=True, padding_value=0.0)  # 用零补充，使长度对齐
-    label = rnn_utils.pad_sequence(label, batch_first=True, padding_value=0.0)  # 这行代码只是为了把列表变为tensor
-    re_data = data.unsqueeze(-1) if data.dim() < 3 else data
-    return re_data, label, data_length
+def collate_fn(data_tuple):
+    '''
+    被dataloader调用，将原始数据处理成为可以输入到网络中的格式
+
+    v0.0版本: 拟采用lstm方法，所以要有1）按数据size排序，2）pad齐整数据
+    '''
+    version = 0.0
+    if version == 0.0:
+        data_tuple.sort(key=lambda x: len(x[0]), reverse=True)  # 1) 根据batch中各个数据的长度进行排序，这是做pad_sqequence的要求
+        data_x = [sq[0] for sq in data_tuple]  # 已知数据，即x
+        data_y = [sq[1] for sq in data_tuple]  # 已知数据，即y
+        data_length = [len(sq[0]) for sq in data_tuple]  # batch每条数据的长度
+        data_x = rnn_utlils.pad_sequence(data_x, batch_first=True, padding_value=0.0)  # 规整不等长数据至等长
+        data_y = rnn_utlils.pad_sequence(data_y, batch_first=True, padding_value=0.0)
+        return data_x, data_y, data_length
 
 
-class RNN(nn.Module):
-    def __init__(self, inputsize, hiddensize, num_layers):
-        super(RNN, self).__init__()
+class Encoder(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers, output_size):
+        super(Encoder, self).__init__()
         self.rnn = nn.LSTM(
-            input_size=inputsize,
-            hidden_size=hiddensize,
+            input_size=input_size,
+            hidden_size=hidden_size,
             num_layers=num_layers,
             batch_first=True
         )
-        self.out = nn.Sequential(
-            nn.Linear(hiddensize, 60)
-        )
 
     def forward(self, x):
-        r_out, (h_n, h_c) = self.rnn(x, None)  # None 表示 hidden state 会用全0的 state
-        # out_pad, out_len = rnn_utils.pad_packed_sequence(r_out, batch_first=True)
-        out = self.out(h_n[-1])
-        return out
+        lstm_out, hidden_out = self.rnn(x)
+        # mid_out, data_len = rnn_utlils.pad_packed_sequence(lstm_out, batch_first=True) # 由于输入是pack_padded_sequence对象，输出也是此类型，要使用反打包函数解包
+        return lstm_out, hidden_out
 
-# ————————————————
-# 版权声明：本文为CSDN博主「肥宅_Sean」的原创文章，遵循CC 4.0 BY-SA版权协议，转载请附上原文出处链接及本声明。
-# 原文链接：https://blog.csdn.net/a19990412/article/details/85139058
+
+class Decoder(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layer, output_size):
+        super(Decoder, self).__init__()
+        self.rnn = nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layer,
+            batch_first=True
+        )
+        self.out = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, output_size)
+        )
+
+    def forward(self, input, hidden_input):
+        lstm_out, hidden_out = self.rnn(input, hidden_input)
+        lstm_out = self.out(lstm_out)
+        return lstm_out, hidden_out
+
+
+class Seq2seq(nn.Module):
+    def __init__(self, encoder, decoder):
+        super(Seq2seq, self).__init__()
+        self.encoder = encoder
+        self.decoder = decoder
+
+    def forward(self, x):
+        encoder_out, encoder_hidden = self.encoder(x)
+        decoder_hidden = encoder_hidden
+        batch_num = encoder_hidden[0].shape[1]
+        decoder_input = torch.zeros(batch_num, 1, 3)
+        decoder_rec = torch.empty(batch_num,30,3)
+        for i in range(30):
+            decoder_out, decoder_hidden = self.decoder(decoder_input, decoder_hidden)
+            decoder_input = decoder_out
+            for j in range(batch_num):
+                decoder_rec[j][i] = decoder_out[j]
+        return decoder_rec
+
+
+def get_file_path_list(dir_path):
+    result = []
+    for maindir, subdir, file_name_list in os.walk(dir_path):
+        for filename in file_name_list:
+            apath = os.path.join(maindir, filename)
+            result.append(apath)
+    print(result)
+    return result
 
 
 if __name__ == '__main__':
-
     EPOCH = 5
-    inputsize = 4
-    batchsize = 2
-    hiddensize = 128
-    num_layers = 2
-    learning_rate = 0.001
-    root_dir = '../../forecasting_sample/data/'
 
-    data_ = MyData(root_dir)  # 注意这里是一个数据集对象，其中定义了__getitem__方法，调用时才是输出对应的数据
-    data_loader = DataLoader(data_, batch_size=batchsize, shuffle=True, collate_fn=collate_fn)
-    net = RNN(inputsize, hiddensize, num_layers)
+    encoder_input_size = 4
+    encoder_hidden_size = 30
+    encoder_num_layer = 1
+    encoder_output_size = 3
+
+    decoder_input_size = 3
+    decoder_hidden_size = 30
+    decoder_num_layer = 1
+    decoder_output_size = 3
+
+    batch_size = 3
+    learning_rate = 0.001
+
+    file_list = get_file_path_list(r'e:\argoverse-api-ccuse\forecasting_sample\data')
+    data = Data_read(file_list)
+    data_loader = DataLoader(data, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+
+    encoder = Encoder(encoder_input_size, encoder_hidden_size, encoder_num_layer, encoder_output_size)
+    decoder = Decoder(decoder_input_size, decoder_hidden_size, decoder_num_layer, decoder_output_size)
+
+    net = Seq2seq(encoder, decoder)
     criteria = nn.MSELoss()
     optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
 
-    # 训练方法一
     for epoch in range(EPOCH):
-        for batch_id, (batch_x, batch_y, batch_x_len) in enumerate(data_loader):
-            batch_x_pack = rnn_utils.pack_padded_sequence(batch_x, batch_x_len, batch_first=True)
-            out = net(batch_x_pack)  # out.data's shape (所有序列总长度, hiddensize)
-            # out_pad, out_len = rnn_utils.pad_packed_sequence(out, batch_first=True)
-            loss = criteria(out, batch_y)
-            optimizer.zero_grad()
+        for batch_id, (batch_x, batch_y, batch_X_len) in enumerate(data_loader):
+            batch_x_pack = rnn_utlils.pack_padded_sequence(batch_x, batch_X_len, batch_first=True)
+            out = net(batch_x_pack)
+            batch_y_treated = torch_treat().label_tensor_treat(out, batch_y)
+            loss = criteria(out, batch_y_treated)
             loss.backward()
             optimizer.step()
             print('epoch:{:2d}, batch_id:{:2d}, loss:{:6.4f}'.format(epoch, batch_id, loss))
 
-    # # 训练方法二
-    # for epoch in range(EPOCH):
-    #     for batch_id, (batch_x, batch_y, batch_x_len) in enumerate(data_loader):
-    #         batch_x_pack = rnn_utils.pack_padded_sequence(batch_x, batch_x_len, batch_first=True)
-    #         batch_y_pack = rnn_utils.pack_padded_sequence(batch_y, batch_x_len, batch_first=True)
-    #         out, _ = net(batch_x_pack)  # out.data's shape (所有序列总长度, hiddensize)
-    #         loss = criteria(out.data, batch_y_pack.data)
-    #         optimizer.zero_grad()
-    #         loss.backward()
-    #         optimizer.step()
-    #         print('epoch:{:2d}, batch_id:{:2d}, loss:{:6.4f}'.format(epoch, batch_id, loss))
-
-    print('Training done!')
+    pass

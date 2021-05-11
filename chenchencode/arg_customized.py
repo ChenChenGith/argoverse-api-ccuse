@@ -131,7 +131,8 @@ class data_loader_customized(object):
                                normalization=False,
                                norm_range=100,
                                range_const=False,
-                               range_box=None) -> (pd.DataFrame, pd.DataFrame):
+                               range_box=None,
+                               return_type='df') -> (pd.DataFrame, pd.DataFrame):
         """Get the first (know_num, 2) coordinates of all track_ID in the current sequence for the use of trajectory prediction
         Data of the target track are placed at the first
         Args:
@@ -144,6 +145,7 @@ class data_loader_customized(object):
             norm_range: used for the normalization. points whose distance between the first point of agent/AV is equal to norm_range, then it will map to 1
             range_const: if true, only the coordinates in the range_box are extracted
             range_box: the four point of the range
+            return_type: to chose the outputs' format, [dataframe, array, tensor]
         Returns:
             train_data: pd.DataFrame(columns = ['TIMESTAMP', 'TRACK_ID', 'X', 'Y']), n*2
             label_data: pd.DataFrame(columns = ['TIMESTAMP', 'X', 'Y']), (50-know_num)*2 ,order is in scending time
@@ -151,12 +153,13 @@ class data_loader_customized(object):
         if normalization: relative = True
         if range_const == True and range_box is None:
             raise ValueError('need range_box parameters')
+        assert return_type in ['df', 'array', 'tensor'], 'return type should be df or array'
 
         seq_df = copy.deepcopy(self.seq_df[:])  # copy seq_df
         seq_df['TIMESTAMP'] -= seq_df['TIMESTAMP'][0]  # time normalization
         seq_df['TIMESTAMP'] = seq_df['TIMESTAMP'].round(1)
         # sometimes, the sample frequency > 0.1s, thus need delete the extra data
-        seq_df.drop(seq_df[seq_df['TIMESTAMP'] > 5].index, inplace=True)
+        seq_df.drop(seq_df[seq_df['TIMESTAMP'] > 4.9].index, inplace=True)
         seq_df.sort_values('TIMESTAMP', inplace=True)
 
         if range_const == True:
@@ -193,7 +196,7 @@ class data_loader_customized(object):
                 know_data['TRACK_ID'][know_data['TRACK_ID'] == -1] = 1
 
             label_data = seq_df[(seq_df['TIMESTAMP'] >= know_num / 10) & (seq_df['OBJECT_TYPE'] == 'AV')] \
-                [['TIMESTAMP', 'X', 'Y', 'OBJECT_TYPE']]
+                [['TIMESTAMP', 'X', 'Y']]
 
             if relative:  # map the original data to relative values
                 x0, y0 = know_data['X'].iloc[know_num], know_data['Y'].iloc[know_num]
@@ -220,8 +223,18 @@ class data_loader_customized(object):
         standard_label_data = standard_label_data.groupby('TIMESTAMP_1').mean()
 
         if normalization:  # normalizing the raw coordinates
-            know_data[['X', 'Y']] = know_data[['X', 'Y']] / norm_range
+            know_data[['TRACK_ID', 'X', 'Y']] = know_data[['TRACK_ID', 'X', 'Y']] / norm_range
             standard_label_data[['X', 'Y']] = standard_label_data[['X', 'Y']] / norm_range
+
+        know_data.drop(columns=['OBJECT_TYPE'], inplace=True)
+
+        if return_type == 'array':
+            know_data = np.array(know_data)
+            standard_label_data = np.array(standard_label_data)
+        elif return_type == 'tensor':
+            know_data = torch.from_numpy(know_data.values).float()
+            standard_label_data = torch.from_numpy(standard_label_data.values).float()
+
 
         return (know_data, standard_label_data)
 
@@ -257,19 +270,15 @@ class torch_treat(object):
     def __init__(self):
         pass
 
-    def label_tensor_treat(self, pred_data, label, denorm=True, norm_range=100) -> torch.tensor:
+    def label_tensor_treat(self, pred_data, label) -> torch.tensor:
         '''
         used for the adjustment of label data, when label data have nan
         Args:
             pred_data: tensor(n,2), predicted trajectory coordinates from your algorithm
             label: tensor(m,2), label trajectory coordinates that may contains NaN
-            denorm: if true, predicted trajectory data will be denormalized using norm_range
-            norm_range: range used in the normalization when extract training data
         Returns:
             treated_label: tensor(m,2), label trajectory without NaN
         '''
-        if denorm:
-            label = label / norm_range
         treated_label = torch.where(torch.isnan(label), pred_data, label)
         return treated_label
 

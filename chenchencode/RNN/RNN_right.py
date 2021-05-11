@@ -102,12 +102,12 @@ def run_train_lstm():
     inp_dim = 3
     out_dim = 1
     mid_dim = 8
-    mid_layers = 1
-    batch_size = 12 * 4
+    mid_layers = 2
+    batch_size = 6
     mod_dir = '.'
 
     '''load data'''
-    data = load_data()
+    data, mean_v, std_v, raw_data = load_data()
     data_x = data[:-1, :]
     data_y = data[+1:, 0]
     assert data_x.shape[1] == inp_dim
@@ -159,8 +159,8 @@ def run_train_lstm():
 
         if e % 64 == 0:
             print('Epoch: {:4}, Loss: {:.5f}'.format(e, loss.item()))
-    # torch.save(net.state_dict(), '{}/net.pth'.format(mod_dir))
-    # print("Save in:", '{}/net.pth'.format(mod_dir))
+    torch.save(net.state_dict(), '{}/net.pth'.format(mod_dir))
+    print("Save in:", '{}/net.pth'.format(mod_dir))
 
     '''eval'''
     net.load_state_dict(torch.load('{}/net.pth'.format(mod_dir), map_location=lambda storage, loc: storage))
@@ -182,10 +182,13 @@ def run_train_lstm():
     test_y, hc = net.output_y_hc(test_x[:train_size], (zero_ten, zero_ten))
     test_x[train_size + 1, 0, 0] = test_y[-1]
     for i in range(train_size + 1, len(data) - 2):
-        test_y, hc = net.output_y_hc(test_x[i:i + 1], hc)
+        test_y, hc = net.output_y_hc(test_x[i:i + 1], hc)   # 这里，每个步骤的hc保留用于下一步预测
         test_x[i + 1, 0, 0] = test_y[-1]
     pred_y = test_x[1:, 0, 0]
     pred_y = pred_y.cpu().data.numpy()
+
+    data_y = data_y * std_v + mean_v
+    pred_y = pred_y * std_v + mean_v
 
     diff_y = pred_y[train_size:] - data_y[train_size:-1]
     l1_loss = np.mean(np.abs(diff_y))
@@ -194,7 +197,7 @@ def run_train_lstm():
 
     plt.plot(pred_y, 'r', label='pred')
     plt.plot(data_y, 'b', label='real', alpha=0.3)
-    plt.plot([train_size, train_size], [-1, 2], color='k', label='train | pred')
+    # plt.plot([train_size, train_size], [-1, 2], color='k', label='train | pred')
     plt.legend(loc='best')
     plt.savefig('lstm_reg.png')
     plt.show()
@@ -292,6 +295,7 @@ class RegLSTM(nn.Module):
 
     def forward(self, x):
         y = self.rnn(x)[0]  # y, (h, c) = self.rnn(x)
+        hc = self.rnn(x)[1]
 
         seq_len, batch_size, hid_dim = y.shape
         y = y.view(-1, hid_dim)
@@ -380,8 +384,10 @@ def load_data():
     seq = np.concatenate((seq_number, seq_year_month), axis=1)
 
     # normalization
-    seq = (seq - seq.mean(axis=0)) / seq.std(axis=0)
-    return seq
+    mean_value = seq.mean(axis=0)
+    std_value = seq.std(axis=0)
+    seq_norm = (seq - mean_value) / std_value
+    return seq_norm, mean_value[0], std_value[0], seq
 
 
 if __name__ == '__main__':

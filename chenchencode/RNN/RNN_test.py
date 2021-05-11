@@ -116,6 +116,7 @@ if __name__ == '__main__':
 
     # 训练方法一
     for epoch in range(EPOCH):
+
         for batch_id, (batch_x, batch_y, batch_x_len) in enumerate(data_loader):
             batch_x_pack = rnn_utils.pack_padded_sequence(batch_x, batch_x_len, batch_first=True)
             out = net(batch_x_pack)  # out.data's shape (所有序列总长度, hiddensize)
