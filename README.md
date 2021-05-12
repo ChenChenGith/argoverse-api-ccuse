@@ -95,7 +95,9 @@ from chenchencode.arg_customized import data_loader_customized
 #     norm_range: used for the normalization. points whose distance between the first point of agent/AV is equal to norm_range, then it will map to 1  
 #     range_const: if true, only the coordinates in the range_box are extracted
 #     range_box: the four point of the range, can get from function (find_centerline_veh_coor)
-#     return_type: to chose the outputs' format, [dataframe, array, tensor]              
+#     return_type: to chose the outputs' format, [dataframe, array, tensor]
+#     include_centerline: if true, the center line will be found and cat with trajectory data.
+#                         note: when include_centerline=True, return_type will be assign to be tensor.              
 # Returns:
 #     train_data: pd.DataFrame(columns = ['TIMESTAMP', 'TRACK_ID', 'X', 'Y']), n*2
 #     label_data: pd.DataFrame(columns = ['TIMESTAMP', 'X', 'Y']), (50-know_num)*2 ,order is in scending time
@@ -109,7 +111,8 @@ train_data, label_data = fdlc.get_all_traj_for_train(know_num=20,
                                                      norm_range=100
                                                      range_const=False,
                                                      range_box=None,
-                                                     return_type='df')
+                                                     return_type='df',
+                                                     include_centerline=False)
 ```
 
 **Output:**

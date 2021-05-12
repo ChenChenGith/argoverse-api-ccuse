@@ -6,13 +6,15 @@ import copy
 from pandas import DataFrame
 import pickle
 import pandas as pd
-import time
 import torch
+
+import os
+py_path = os.path.dirname(os.path.abspath(__file__))
 
 
 class find_centerline_veh_coor(object):
     def __init__(self, x0, y0, theta, city, range_front=80, range_back=20, range_side=30, range_sta=False,
-                 save_path=''):
+                 save_path=py_path):
         '''
         Args:
             x0: float, vehicle coordinate
@@ -65,8 +67,8 @@ class find_centerline_veh_coor(object):
 
     def rebuild_centerline(self):
         '''rebuild centerline and save data'''
-        save_path_shapely = self.save_path + self.city + '_shapely'
-        save_path_array = self.save_path + self.city + '_array'
+        save_path_shapely = self.save_path + '\\' + self.city + '_shapely'
+        save_path_array = self.save_path + '\\' + self.city + '_array'
         try:
             f = open(save_path_shapely, 'rb')
             line_set_shapely = pickle.load(f)
@@ -95,13 +97,32 @@ class find_centerline_veh_coor(object):
         self.line_set_shapely = line_set_shapely
         self.line_set_array = line_set_array
 
-    def find(self):
+    def find(self, tensor_output=False):
+        '''
+        Args:
+            tensor_output: if true, output type will be 'tensor']
+        '''
         est_id = []
         for id, info in self.line_set_shapely.items():
             if self.polygon.intersects(info):
                 est_id.append(id)
 
-        re_cl = [self.line_set_array[lane_id] for lane_id in est_id]
+        i = 1
+        if tensor_output:
+            for lane_id in est_id:
+                cl = DataFrame(self.line_set_array[lane_id], columns=['X', 'Y'])
+                cl['TIMESTAMP'] = 0
+                cl['TRACKID'] = -i
+                cl = cl[['TIMESTAMP', 'TRACKID', 'X', 'Y']]
+                cl = torch.from_numpy(cl.values).float()
+                if i == 1:
+                    re_cl = cl
+                else:
+                    re_cl = torch.cat((re_cl, cl))
+                i += 1
+            pass
+        else:
+            re_cl = [self.line_set_array[lane_id] for lane_id in est_id]
 
         return re_cl, self.range_box
 
@@ -132,7 +153,8 @@ class data_loader_customized(object):
                                norm_range=100,
                                range_const=False,
                                range_box=None,
-                               return_type='df') -> (pd.DataFrame, pd.DataFrame):
+                               return_type='df',
+                               include_centerline=False) -> (pd.DataFrame, pd.DataFrame):
         """Get the first (know_num, 2) coordinates of all track_ID in the current sequence for the use of trajectory prediction
         Data of the target track are placed at the first
         Args:
@@ -146,6 +168,8 @@ class data_loader_customized(object):
             range_const: if true, only the coordinates in the range_box are extracted
             range_box: the four point of the range
             return_type: to chose the outputs' format, [dataframe, array, tensor]
+            include_centerline: if true, the center line will be found and cat with trajectory data.
+                                note: when include_centerline=True, return_type will be assign to be tensor.
         Returns:
             train_data: pd.DataFrame(columns = ['TIMESTAMP', 'TRACK_ID', 'X', 'Y']), n*2
             label_data: pd.DataFrame(columns = ['TIMESTAMP', 'X', 'Y']), (50-know_num)*2 ,order is in scending time
@@ -154,6 +178,7 @@ class data_loader_customized(object):
         if range_const == True and range_box is None:
             raise ValueError('need range_box parameters')
         assert return_type in ['df', 'array', 'tensor'], 'return type should be df or array'
+        if include_centerline: return_type = 'tensor'
 
         seq_df = copy.deepcopy(self.seq_df[:])  # copy seq_df
         seq_df['TIMESTAMP'] -= seq_df['TIMESTAMP'][0]  # time normalization
@@ -235,6 +260,11 @@ class data_loader_customized(object):
             know_data = torch.from_numpy(know_data.values).float()
             standard_label_data = torch.from_numpy(standard_label_data.values).float()
 
+        if include_centerline:
+            x0, y0, angle, city, vehicle_stabale = self.get_main_dirction(agent_first=True)
+            re_cl, range_box = find_centerline_veh_coor(x0, y0, angle, city, range_sta=vehicle_stabale).find(
+                tensor_output=True)
+            know_data = torch.cat((know_data, re_cl))
 
         return (know_data, standard_label_data)
 
@@ -248,7 +278,7 @@ class data_loader_customized(object):
             x0, y0: the initial coordinate, for the surrounding centerline extraction
             angle: the over all angle, for the surrounding centerline extraction
             city: city name
-            square_range: When vehicle is amost stationary, it's True, so suggest range_sta=True in finding surrounding centerline
+            vehicle_stabale: When vehicle is amost stationary, it's True, so suggest range_sta=True in finding surrounding centerline
         """
         city = self.seq_df['CITY_NAME'].iloc[0]
         seq_df = copy.deepcopy(self.seq_df[:])  # copy seq_df
@@ -257,13 +287,13 @@ class data_loader_customized(object):
         x0, y0, x1, y1 = seq_df['X'][0], seq_df['Y'][0], seq_df['X'][use_point], seq_df['Y'][use_point]
 
         if np.abs(x1 - x0 + y1 - y0) < 0.5:  # if the moving distance <0.5m
-            square_range = True
+            vehicle_stabale = True
             angle = 0
         else:
-            square_range = False
+            vehicle_stabale = False
             angle = np.arctan2(y1 - y0, x1 - x0)
 
-        return (x0, y0, angle, city, square_range)
+        return (x0, y0, angle, city, vehicle_stabale)
 
 
 class torch_treat(object):
@@ -313,9 +343,9 @@ if __name__ == '__main__':
 
     # ===================================================
     # get trajectory direction
-    x0, y0, angle, city, square_range = fdlc.get_main_dirction(agent_first=True)
-    print(square_range)
-    re_cl, range_box = find_centerline_veh_coor(x0, y0, angle, city, range_sta=square_range).find()
+    x0, y0, angle, city, vehicle_stabale = fdlc.get_main_dirction(agent_first=True)
+    print(vehicle_stabale)
+    re_cl, range_box = find_centerline_veh_coor(x0, y0, angle, city, range_sta=vehicle_stabale).find()
     for i in range(len(re_cl)):
         x = re_cl[i]
         # display(Polygon(x))
