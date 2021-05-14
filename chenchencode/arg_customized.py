@@ -1,14 +1,15 @@
 from argoverse.map_representation.map_api import ArgoverseMap
-from shapely.geometry import Polygon, LineString, MultiPoint
+from shapely.geometry import Polygon, LineString, MultiPoint, Point
 from argoverse.utils.se2 import SE2
 import numpy as np
 import copy
-from pandas import DataFrame
+from pandas import DataFrame, Series
 import pickle
 import pandas as pd
 import torch
 
 import os
+
 py_path = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -25,11 +26,12 @@ class find_centerline_veh_coor(object):
             range_back: float, search range in the back of the vehicle
             range_sta: if true, means that the vehicle is amost stationary, all the range value will be set to 20
             save_path: str, path to save the rebuilt centerline in Shaple format
-        Returns:
+        Returns:  Object.find()
             surr_centerline: np.array(m,m,3), the surrounding centerline coordinates
             range_box: np.array(4,3), the range box coordinates
         '''
         self.x0, self.y0, self.theta = x0, y0, theta
+        self.center_point = Point([x0, y0])
         if not range_sta:
             self.range_front, self.range_back, self.range_side = range_front, range_back, range_side
         else:
@@ -97,29 +99,48 @@ class find_centerline_veh_coor(object):
         self.line_set_shapely = line_set_shapely
         self.line_set_array = line_set_array
 
-    def find(self, tensor_output=False):
+    def find(self, output_type='list'):
         '''
         Args:
-            tensor_output: if true, output type will be 'tensor']
+            output_type: which type of output will be: ['list', 'df', 'tensor']
         '''
         est_id = []
+        est_dis = []
         for id, info in self.line_set_shapely.items():
             if self.polygon.intersects(info):
+                distance = self.center_point.distance(info)
                 est_id.append(id)
+                est_dis.append(distance)
 
-        i = 1
-        if tensor_output:
-            for lane_id in est_id:
+        est_id_Se = Series(est_dis, index=est_id)
+        est_id_Se = est_id_Se.sort_values()
+        est_id_Se = Series(range(1, est_id_Se.shape[0] + 1), index=est_id_Se.index)
+
+        i = 0
+        if output_type == 'tensor':
+            for lane_id in est_id_Se.index:
                 cl = DataFrame(self.line_set_array[lane_id], columns=['X', 'Y'])
                 cl['TIMESTAMP'] = 0
-                cl['TRACKID'] = -i
-                cl = cl[['TIMESTAMP', 'TRACKID', 'X', 'Y']]
+                cl['TRACK_ID'] = -1 * est_id_Se[lane_id]
+                cl = cl[['TIMESTAMP', 'TRACK_ID', 'X', 'Y']]
                 cl = torch.from_numpy(cl.values).float()
-                if i == 1:
+                if i == 0:
                     re_cl = cl
+                    i += 1
                 else:
                     re_cl = torch.cat((re_cl, cl))
-                i += 1
+            pass
+        elif output_type == 'df':
+            for lane_id in est_id_Se.index:
+                cl = DataFrame(self.line_set_array[lane_id], columns=['X', 'Y'])
+                cl['TIMESTAMP'] = 0
+                cl['TRACK_ID'] = -1 * est_id_Se[lane_id]
+                cl = cl[['TIMESTAMP', 'TRACK_ID', 'X', 'Y']]
+                if i == 0:
+                    re_cl = cl
+                    i += 1
+                else:
+                    re_cl = pd.concat((re_cl, cl), axis=0)
             pass
         else:
             re_cl = [self.line_set_array[lane_id] for lane_id in est_id]
@@ -150,7 +171,8 @@ class data_loader_customized(object):
                                forGCN=False,
                                relative=False,
                                normalization=False,
-                               norm_range=100,
+                               norm_range_time=5,
+                               norm_range_2=100,
                                range_const=False,
                                range_box=None,
                                return_type='df',
@@ -164,7 +186,8 @@ class data_loader_customized(object):
             relative: if true, the coordinates in both train and label data will be mapped to relative values with the start point of agent/AV
             normalization: if true, the raw coordinates will be normalized to nearly [0,1] using the norm_range
                            note: when normalization=True, relative will be assign to be True.
-            norm_range: used for the normalization. points whose distance between the first point of agent/AV is equal to norm_range, then it will map to 1
+            norm_range_time: used for the normalization on TIMESTAMP
+            norm_range_2: used for the normalization on [TRACKID,X,Y]. points whose distance between the first point of agent/AV is equal to norm_range, then it will map to 1
             range_const: if true, only the coordinates in the range_box are extracted
             range_box: the four point of the range
             return_type: to chose the outputs' format, [dataframe, array, tensor]
@@ -216,30 +239,35 @@ class data_loader_customized(object):
 
         if not agent_first:  # exchange index of agent and AV
             if 'AGENT' in know_data['OBJECT_TYPE'].unique():
-                know_data['TRACK_ID'][know_data['TRACK_ID'] == 0] = -1
+                know_data['TRACK_ID'][know_data['TRACK_ID'] == 0] = None
                 know_data['TRACK_ID'][know_data['TRACK_ID'] == 1] = 0
-                know_data['TRACK_ID'][know_data['TRACK_ID'] == -1] = 1
+                know_data['TRACK_ID'][know_data['TRACK_ID'] == None] = 1
 
             label_data = seq_df[(seq_df['TIMESTAMP'] >= know_num / 10) & (seq_df['OBJECT_TYPE'] == 'AV')] \
                 [['TIMESTAMP', 'X', 'Y']]
 
-            if relative:  # map the original data to relative values
-                x0, y0 = know_data['X'].iloc[know_num], know_data['Y'].iloc[know_num]
-                know_data['X'] -= x0
-                know_data['Y'] -= y0
-                label_data['X'] -= x0
-                label_data['Y'] -= y0
+            x0, y0 = know_data[know_data['TRACK_ID'] == 0]['X'].iloc[0], \
+                     know_data[know_data['TRACK_ID'] == 0]['Y'].iloc[0]
 
         else:
             label_data = seq_df[(seq_df['TIMESTAMP'] >= know_num / 10) & (seq_df['OBJECT_TYPE'] == 'AGENT')] \
                 [['TIMESTAMP', 'X', 'Y']]
 
-            if relative:  # map the original data to relative values
-                x0, y0 = know_data['X'].iloc[0], know_data['Y'].iloc[0]
-                know_data['X'] -= x0
-                know_data['Y'] -= y0
-                label_data['X'] -= x0
-                label_data['Y'] -= y0
+            x0, y0 = know_data['X'].iloc[0], know_data['Y'].iloc[0]
+
+        know_data.drop(columns=['OBJECT_TYPE'], inplace=True)
+
+        if include_centerline:  # 添加周边centerline数据
+            x0, y0, angle, city, vehicle_stabale = self.get_main_dirction(agent_first=True)
+            re_cl, range_box = find_centerline_veh_coor(x0, y0, angle, city, range_sta=vehicle_stabale).find(
+                output_type='df')
+            know_data = pd.concat((know_data, re_cl))
+
+        if relative:  # map the original data to relative values
+            know_data['X'] -= x0
+            know_data['Y'] -= y0
+            label_data['X'] -= x0
+            label_data['Y'] -= y0
 
         # there may be same timestamp between two rows, or missing of some timestep, so fill it
         standard_df = DataFrame(np.linspace(know_num / 10, 4.9, 50 - know_num), columns=['TIMESTAMP']).round(1)
@@ -248,10 +276,10 @@ class data_loader_customized(object):
         standard_label_data = standard_label_data.groupby('TIMESTAMP_1').mean()
 
         if normalization:  # normalizing the raw coordinates
-            know_data[['TRACK_ID', 'X', 'Y']] = know_data[['TRACK_ID', 'X', 'Y']] / norm_range
-            standard_label_data[['X', 'Y']] = standard_label_data[['X', 'Y']] / norm_range
-
-        know_data.drop(columns=['OBJECT_TYPE'], inplace=True)
+            know_data['TIMESTAMP'] = know_data['TIMESTAMP'] / norm_range_time
+            know_data[['TRACK_ID', 'X', 'Y']] = know_data[['TRACK_ID', 'X', 'Y']] / norm_range_2
+            standard_label_data['TIMESTAMP'] = standard_label_data['TIMESTAMP'] / norm_range_time
+            standard_label_data[['X', 'Y']] = standard_label_data[['X', 'Y']] / norm_range_2
 
         if return_type == 'array':
             know_data = np.array(know_data)
@@ -259,12 +287,6 @@ class data_loader_customized(object):
         elif return_type == 'tensor':
             know_data = torch.from_numpy(know_data.values).float()
             standard_label_data = torch.from_numpy(standard_label_data.values).float()
-
-        if include_centerline:
-            x0, y0, angle, city, vehicle_stabale = self.get_main_dirction(agent_first=True)
-            re_cl, range_box = find_centerline_veh_coor(x0, y0, angle, city, range_sta=vehicle_stabale).find(
-                tensor_output=True)
-            know_data = torch.cat((know_data, re_cl))
 
         return (know_data, standard_label_data)
 
@@ -355,8 +377,8 @@ if __name__ == '__main__':
 
     # ===================================================
     # get data
-    kd, pda = fdlc.get_all_traj_for_train(agent_first=True, forGCN=False, normalization=False, range_const=True,
-                                          range_box=range_box)
+    kd, pda = fdlc.get_all_traj_for_train(agent_first=True, forGCN=False, normalization=True, range_const=True,
+                                          range_box=range_box, include_centerline=True)
     g = kd.groupby('TRACK_ID')
     for name, data in g:
         c = 'black' if name != 0 else 'red'

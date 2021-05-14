@@ -23,7 +23,7 @@ Codes can be found [Here](chenchencode/arg_customized.py)
 
 ``` python
 from chenchencode.arg_customized import find_centerline_veh_coor
-# Args:
+# Object Args:
 #     x0: float, vehicle coordinate
 #     y0: float, vehicle coordinate
 #     theta: float, vehicle heading angle, in radian
@@ -31,11 +31,13 @@ from chenchencode.arg_customized import find_centerline_veh_coor
 #     range_front: float, search range in front of the vehicle
 #     range_back: float, search range in the back of the vehicle
 #     range_sta: if true, means that the vehicle is amost stationary, all the range value will be set to 20
+# Method find() Args:
+#     output_type: which type of output will be: ['list', 'df', 'tensor']
 # Returns:
 #     surr_centerline: np.array(m,m,3), the surrounding centerline coordinates
 #     range_box: np.array(4,3), the range box coordinates
 find = find_centerline_veh_coor(x0, y0, theta, city, range_front=80, range_back=20, range_side=30, range_sta=False)
-surr_centerline, range_box = find.find() -> np.array(n,m,3), np.array(4,2)
+surr_centerline, range_box = find.find(output_type='list') -> np.array(n,m,3), np.array(4,2)
 ```
 
 **output:**
