@@ -171,7 +171,7 @@ class data_loader_customized(object):
                                forGCN=False,
                                relative=False,
                                normalization=False,
-                               norm_range_time=5,
+                               norm_range_time=1,
                                norm_range_2=100,
                                range_const=False,
                                range_box=None,
@@ -263,23 +263,26 @@ class data_loader_customized(object):
                 output_type='df')
             know_data = pd.concat((know_data, re_cl))
 
-        if relative:  # map the original data to relative values
-            know_data['X'] -= x0
-            know_data['Y'] -= y0
-            label_data['X'] -= x0
-            label_data['Y'] -= y0
-
         # there may be same timestamp between two rows, or missing of some timestep, so fill it
         standard_df = DataFrame(np.linspace(know_num / 10, 4.9, 50 - know_num), columns=['TIMESTAMP']).round(1)
         standard_label_data = pd.merge(standard_df, label_data, left_on='TIMESTAMP', right_on='TIMESTAMP', how='outer')
         standard_label_data['TIMESTAMP_1'] = standard_label_data['TIMESTAMP']
         standard_label_data = standard_label_data.groupby('TIMESTAMP_1').mean()
 
+        if relative:  # map the original data to relative values
+            know_data['X'] -= x0
+            know_data['Y'] -= y0
+            standard_label_data['X'] -= x0
+            standard_label_data['Y'] -= y0
+
         if normalization:  # normalizing the raw coordinates
-            know_data['TIMESTAMP'] = know_data['TIMESTAMP'] / norm_range_time
+            # know_data['TIMESTAMP'] = know_data['TIMESTAMP'] / norm_range_time
             know_data[['TRACK_ID', 'X', 'Y']] = know_data[['TRACK_ID', 'X', 'Y']] / norm_range_2
-            standard_label_data['TIMESTAMP'] = standard_label_data['TIMESTAMP'] / norm_range_time
+            # standard_label_data['TIMESTAMP'] = standard_label_data['TIMESTAMP'] / norm_range_time
             standard_label_data[['X', 'Y']] = standard_label_data[['X', 'Y']] / norm_range_2
+
+            know_data.drop(columns=['TIMESTAMP'], inplace=True)
+            standard_label_data.drop(columns=['TIMESTAMP'], inplace=True)
 
         if return_type == 'array':
             know_data = np.array(know_data)

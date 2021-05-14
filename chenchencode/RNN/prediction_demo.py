@@ -99,8 +99,8 @@ class Seq2seq(nn.Module):
         encoder_out, encoder_hidden = self.encoder(x)
         decoder_hidden = encoder_hidden
         batch_num = encoder_hidden[0].shape[1]
-        decoder_input = torch.zeros(batch_num, 1, 3)
-        decoder_rec = torch.empty(batch_num,30,3)
+        decoder_input = torch.zeros(batch_num, 1, 2)
+        decoder_rec = torch.empty(batch_num,30,2)
         for i in range(30):
             decoder_out, decoder_hidden = self.decoder(decoder_input, decoder_hidden)
             decoder_input = decoder_out
@@ -119,17 +119,17 @@ def get_file_path_list(dir_path):
 
 
 if __name__ == '__main__':
-    EPOCH = 5
+    EPOCH = 8
 
-    encoder_input_size = 4
+    encoder_input_size = 3
     encoder_hidden_size = 30
     encoder_num_layer = 1
     encoder_output_size = 3
 
-    decoder_input_size = 3
+    decoder_input_size = 2
     decoder_hidden_size = 30
     decoder_num_layer = 1
-    decoder_output_size = 3
+    decoder_output_size = 2
 
     batch_size = 3
     learning_rate = 0.001
