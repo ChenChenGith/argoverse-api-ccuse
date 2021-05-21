@@ -118,17 +118,6 @@ class find_centerline_veh_coor(object):
 
         i = 0
         if output_type == 'tensor':
-            for lane_id in est_id_Se.index:
-                cl = DataFrame(self.line_set_array[lane_id], columns=['X', 'Y'])
-                cl['TIMESTAMP'] = 0
-                cl['TRACK_ID'] = -1 * est_id_Se[lane_id]
-                cl = cl[['TIMESTAMP', 'TRACK_ID', 'X', 'Y']]
-                cl = torch.from_numpy(cl.values).float()
-                if i == 0:
-                    re_cl = cl
-                    i += 1
-                else:
-                    re_cl = torch.cat((re_cl, cl))
             pass
         elif output_type == 'df':
             for lane_id in est_id_Se.index:
@@ -168,21 +157,20 @@ class data_loader_customized(object):
     def get_all_traj_for_train(self,
                                know_num=20,
                                agent_first=True,
-                               forGCN=False,
                                relative=False,
                                normalization=False,
-                               norm_range_time=1,
+                               norm_range_time=5,
                                norm_range_2=100,
                                range_const=False,
                                range_box=None,
                                return_type='df',
                                include_centerline=False) -> (pd.DataFrame, pd.DataFrame):
-        """Get the first (know_num, 2) coordinates of all track_ID in the current sequence for the use of trajectory prediction
+        """
+        Get the first (know_num, 2) coordinates of all track_ID in the current sequence for the use of trajectory prediction
         Data of the target track are placed at the first
         Args:
             know_num: int, traj data that are known for the prediction
             agent_first: bool, chose agent as the prediction target, else AV
-            forGCN: if true then the outputted know_data will have standard format for each trackID
             relative: if true, the coordinates in both train and label data will be mapped to relative values with the start point of agent/AV
             normalization: if true, the raw coordinates will be normalized to nearly [0,1] using the norm_range
                            note: when normalization=True, relative will be assign to be True.
@@ -196,19 +184,24 @@ class data_loader_customized(object):
         Returns:
             train_data: pd.DataFrame(columns = ['TIMESTAMP', 'TRACK_ID', 'X', 'Y']), n*2
             label_data: pd.DataFrame(columns = ['TIMESTAMP', 'X', 'Y']), (50-know_num)*2 ,order is in scending time
+            all of the output are interpolated
         """
+
+        max_time = 4.9
+        data_point_num = 50
+
         if normalization: relative = True
         if range_const == True and range_box is None:
             raise ValueError('need range_box parameters')
         assert return_type in ['df', 'array', 'tensor'], 'return type should be df or array'
         if include_centerline: return_type = 'tensor'
+        obj_type = 'AGENT' if agent_first else 'AV'
 
         seq_df = copy.deepcopy(self.seq_df[:])  # copy seq_df
         seq_df['TIMESTAMP'] -= seq_df['TIMESTAMP'][0]  # time normalization
         seq_df['TIMESTAMP'] = seq_df['TIMESTAMP'].round(1)
         # sometimes, the sample frequency > 0.1s, thus need delete the extra data
-        seq_df.drop(seq_df[seq_df['TIMESTAMP'] > 4.9].index, inplace=True)
-        seq_df.sort_values('TIMESTAMP', inplace=True)
+        seq_df.drop(seq_df[seq_df['TIMESTAMP'] > max_time].index, inplace=True)
 
         if range_const == True:
             seq_df['index'] = seq_df.index  # reserve index for the merge after shapely operation
@@ -216,82 +209,55 @@ class data_loader_customized(object):
                 Polygon(range_box.to_numpy()).intersection(MultiPoint(seq_df[['X', 'Y', 'index']].to_numpy())))
             tmp_q = DataFrame(index=tmp_inrange[:, 2])
             seq_df = pd.merge(seq_df, tmp_q, left_index=True, right_index=True, how='inner')
-            seq_df.drop('index', inplace=True, axis=1)
 
-        know_data = seq_df[seq_df['TIMESTAMP'] < know_num / 10]  # the known data for all tracks
-        know_data = know_data.sort_values(['OBJECT_TYPE', 'TRACK_ID'])  # sort by type and id, for the factorize
+        seq_df.sort_values(['OBJECT_TYPE', 'TRACK_ID', 'TIMESTAMP'], inplace=True)
+
+        standard_df = DataFrame(np.linspace(0, max_time, data_point_num), columns=['TIMESTAMP']).round(1)
+
+        target_data = seq_df[seq_df['OBJECT_TYPE'] == obj_type]
+        target_data = pd.merge(standard_df, target_data, left_on='TIMESTAMP', right_on='TIMESTAMP', how='outer')
+        target_data = target_data.interpolate().fillna(method='bfill')  # 插值和bfill填充
+
+        know_data = pd.concat((target_data[target_data['TIMESTAMP'] < know_num / 10],
+                               seq_df[(seq_df['TIMESTAMP'] < know_num / 10) & (seq_df['OBJECT_TYPE'] != obj_type)]))
         know_data['TRACK_ID'] = pd.factorize(know_data['TRACK_ID'])[0]
-        know_data = know_data[['TIMESTAMP', 'TRACK_ID', 'X', 'Y', 'OBJECT_TYPE']]  # reserve useful data
+        know_data = know_data.drop_duplicates(['TIMESTAMP', 'TRACK_ID'])
+        # know_data = know_data[['TIMESTAMP', 'TRACK_ID', 'X', 'Y']]
+        know_data = know_data[['TRACK_ID', 'X', 'Y']]
 
-        if forGCN:
-            num_track = len(know_data['TRACK_ID'].unique())
-            know_data['tmp'] = know_data['TIMESTAMP'] + know_data['TRACK_ID'] * 10
-            standard_df = DataFrame(np.tile(np.linspace(0, (know_num - 1) / 10, know_num), num_track),
-                                    columns=['TIMESTAMP_s']).round(1)
-            standard_df['track_tmp'] = np.arange(num_track).repeat(know_num)
-            standard_df['TIMESTAMP_s'] = standard_df['track_tmp'] * 10 + standard_df['TIMESTAMP_s']
-            standard_know_data = pd.merge(standard_df, know_data, left_on='TIMESTAMP_s', right_on='tmp',
-                                          how='outer')
-            standard_know_data[['TIMESTAMP', 'TRACK_ID']] = standard_know_data[['TIMESTAMP_s', 'track_tmp']]
-            know_data = standard_know_data.groupby('TIMESTAMP_s').mean()
-            know_data = know_data[['TIMESTAMP', 'TRACK_ID', 'X', 'Y']]
-            know_data['TIMESTAMP'] = know_data['TIMESTAMP'] - know_data['TRACK_ID'] * 10
+        label_data = target_data[target_data['TIMESTAMP'] >= (know_num - 1) / 10]  # 这里多带了一个已知数据最后一行，用来作为解码器初值
+        label_data = label_data.drop_duplicates('TIMESTAMP')
+        # label_data = label_data[['TIMESTAMP', 'X', 'Y']]
+        label_data = label_data[['X', 'Y']]
 
-        if not agent_first:  # exchange index of agent and AV
-            if 'AGENT' in know_data['OBJECT_TYPE'].unique():
-                know_data['TRACK_ID'][know_data['TRACK_ID'] == 0] = None
-                know_data['TRACK_ID'][know_data['TRACK_ID'] == 1] = 0
-                know_data['TRACK_ID'][know_data['TRACK_ID'] == None] = 1
-
-            label_data = seq_df[(seq_df['TIMESTAMP'] >= know_num / 10) & (seq_df['OBJECT_TYPE'] == 'AV')] \
-                [['TIMESTAMP', 'X', 'Y']]
-
-            x0, y0 = know_data[know_data['TRACK_ID'] == 0]['X'].iloc[0], \
-                     know_data[know_data['TRACK_ID'] == 0]['Y'].iloc[0]
-
-        else:
-            label_data = seq_df[(seq_df['TIMESTAMP'] >= know_num / 10) & (seq_df['OBJECT_TYPE'] == 'AGENT')] \
-                [['TIMESTAMP', 'X', 'Y']]
-
-            x0, y0 = know_data['X'].iloc[0], know_data['Y'].iloc[0]
-
-        know_data.drop(columns=['OBJECT_TYPE'], inplace=True)
+        x0, y0 = know_data['X'].iloc[0], know_data['Y'].iloc[0]
 
         if include_centerline:  # 添加周边centerline数据
-            x0, y0, angle, city, vehicle_stabale = self.get_main_dirction(agent_first=True)
+            x0, y0, angle, city, vehicle_stabale = self.get_main_dirction(agent_first=agent_first)
             re_cl, range_box = find_centerline_veh_coor(x0, y0, angle, city, range_sta=vehicle_stabale).find(
                 output_type='df')
-            know_data = pd.concat((know_data, re_cl))
-
-        # there may be same timestamp between two rows, or missing of some timestep, so fill it
-        standard_df = DataFrame(np.linspace(know_num / 10, 4.9, 50 - know_num), columns=['TIMESTAMP']).round(1)
-        standard_label_data = pd.merge(standard_df, label_data, left_on='TIMESTAMP', right_on='TIMESTAMP', how='outer')
-        standard_label_data['TIMESTAMP_1'] = standard_label_data['TIMESTAMP']
-        standard_label_data = standard_label_data.groupby('TIMESTAMP_1').mean()
+            know_data = pd.concat((know_data, re_cl[['TRACK_ID', 'X', 'Y']]))
 
         if relative:  # map the original data to relative values
             know_data['X'] -= x0
             know_data['Y'] -= y0
-            standard_label_data['X'] -= x0
-            standard_label_data['Y'] -= y0
+            label_data['X'] -= x0
+            label_data['Y'] -= y0
 
         if normalization:  # normalizing the raw coordinates
             # know_data['TIMESTAMP'] = know_data['TIMESTAMP'] / norm_range_time
             know_data[['TRACK_ID', 'X', 'Y']] = know_data[['TRACK_ID', 'X', 'Y']] / norm_range_2
-            # standard_label_data['TIMESTAMP'] = standard_label_data['TIMESTAMP'] / norm_range_time
-            standard_label_data[['X', 'Y']] = standard_label_data[['X', 'Y']] / norm_range_2
-
-            know_data.drop(columns=['TIMESTAMP'], inplace=True)
-            standard_label_data.drop(columns=['TIMESTAMP'], inplace=True)
+            # label_data['TIMESTAMP'] = label_data['TIMESTAMP'] / norm_range_time
+            label_data[['X', 'Y']] = label_data[['X', 'Y']] / norm_range_2
 
         if return_type == 'array':
             know_data = np.array(know_data)
-            standard_label_data = np.array(standard_label_data)
+            label_data = np.array(label_data)
         elif return_type == 'tensor':
             know_data = torch.from_numpy(know_data.values).float()
-            standard_label_data = torch.from_numpy(standard_label_data.values).float()
+            label_data = torch.from_numpy(label_data.values).float()
 
-        return (know_data, standard_label_data)
+        return (know_data, label_data)
 
     def get_main_dirction(self, use_point=10, agent_first=True):
         """
@@ -341,55 +307,38 @@ class torch_treat(object):
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
 
-    # ===================================================
-    # find local centerline test
+    # =>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>
+    # # data loader test - old
 
-    # theta = np.pi * 0.75
-    # city = 'MIA'
-    # x0, y0 = 165, 1647
-    # # city = 'PIT'
-    # # x0, y0 = 2870, 1530
-    # range_dis_front = 50
-    # range_dis_back = 3
-    # range_dis_side = 5
+    # # object establishment
+    # pd.set_option('max_rows', 300)
+    # file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\24.csv'
+    # fdlc = data_loader_customized(file_path)
+
+    # -----------------------------
+    # # get trajectory direction
+    # x0, y0, angle, city, vehicle_stabale = fdlc.get_main_dirction(agent_first=True)
+    # print(vehicle_stabale)
+    # re_cl, range_box = find_centerline_veh_coor(x0, y0, angle, city, range_sta=vehicle_stabale).find()
+    # for i in range(len(re_cl)):
+    #     x = re_cl[i]
+    #     # display(Polygon(x))
+    #     re_cl_df = DataFrame(x)
+    #     plt.plot(re_cl_df[0], re_cl_df[1], linestyle='-.', c='lightcoral', linewidth=0.4)
+    # plt.plot(range_box[0], range_box[1], c='crimson', linestyle='--')
     #
-    # find = find_centerline_veh_coor(x0, y0, theta, city, range_dis_front, range_dis_back, range_dis_side)
-    # re_cl = find.find()
-    # print(re_cl[0])
-
-    # pd.set_option('max_colwidth', 200)
-
-    # data loader test
-    # ===================================================
-    # object establishment
-    pd.set_option('max_rows', 300)
-    file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\24.csv'
-    fdlc = data_loader_customized(file_path)
-
-    # ===================================================
-    # get trajectory direction
-    x0, y0, angle, city, vehicle_stabale = fdlc.get_main_dirction(agent_first=True)
-    print(vehicle_stabale)
-    re_cl, range_box = find_centerline_veh_coor(x0, y0, angle, city, range_sta=vehicle_stabale).find()
-    for i in range(len(re_cl)):
-        x = re_cl[i]
-        # display(Polygon(x))
-        re_cl_df = DataFrame(x)
-        plt.plot(re_cl_df[0], re_cl_df[1], linestyle='-.', c='lightcoral', linewidth=0.4)
-    plt.plot(range_box[0], range_box[1], c='crimson', linestyle='--')
-
-    # ===================================================
-    # get data
-    kd, pda = fdlc.get_all_traj_for_train(agent_first=True, forGCN=False, normalization=True, range_const=True,
-                                          range_box=range_box, include_centerline=True)
-    g = kd.groupby('TRACK_ID')
-    for name, data in g:
-        c = 'black' if name != 0 else 'red'
-        plt.plot(data['X'], data['Y'], c=c, linewidth=0.8)
-        plt.scatter(data['X'].iloc[0], data['Y'].iloc[0], marker='o', s=10, c=c)
-    pda = pda.fillna(method='ffill')
-    pda = pda.fillna(method='backfill')
-    plt.plot(pda['X'], pda['Y'], c='blue')
+    # # -----------------------------
+    # # get data
+    # kd, pda = fdlc.get_all_traj_for_train(agent_first=True, forGCN=False, normalization=True, range_const=True,
+    #                                       range_box=range_box, include_centerline=True)
+    # g = kd.groupby('TRACK_ID')
+    # for name, data in g:
+    #     c = 'black' if name != 0 else 'red'
+    #     plt.plot(data['X'], data['Y'], c=c, linewidth=0.8)
+    #     plt.scatter(data['X'].iloc[0], data['Y'].iloc[0], marker='o', s=10, c=c)
+    # pda = pda.fillna(method='ffill')
+    # pda = pda.fillna(method='backfill')
+    # plt.plot(pda['X'], pda['Y'], c='blue')
 
     ##  full data plot ------------
     # dataq = pd.read_csv(file_path)
@@ -401,5 +350,36 @@ if __name__ == '__main__':
     # dataq = dataq[dataq['OBJECT_TYPE'] == 'AV']
     # plt.scatter(dataq['X'], dataq['Y'], marker='o', c='', edgecolors='g', s=30)
 
+    # plt.axis('equal')
+    # plt.show()
+
+    # =>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>
+    # # data loader test - new
+
+    # object establishment
+    pd.set_option('max_rows', 300)
+    file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\4791.csv'
+    fdlc = data_loader_customized(file_path)
+
+    x0, y0, angle, city, vehicle_stabale = fdlc.get_main_dirction(agent_first=True)
+    print(vehicle_stabale)
+    re_cl, range_box = find_centerline_veh_coor(x0, y0, angle, city, range_sta=vehicle_stabale).find(output_type='list')
+    for i in range(len(re_cl)):
+        x = re_cl[i]
+        # display(Polygon(x))
+        re_cl_df = DataFrame(x)
+        plt.plot(re_cl_df[0], re_cl_df[1], linestyle='-.', c='lightcoral', linewidth=0.4)
+    plt.plot(range_box[0], range_box[1], c='crimson', linestyle='--')
+
+    kd, pda = fdlc.get_all_traj_for_train(agent_first=False, normalization=False, range_const=True,
+                                          range_box=range_box, include_centerline=False)
+    g = kd.groupby('TRACK_ID')
+    for name, data in g:
+        c = 'black' if name != 0 else 'red'
+        plt.plot(data['X'], data['Y'], c=c, linewidth=0.8)
+        plt.scatter(data['X'].iloc[0], data['Y'].iloc[0], marker='o', s=10, c=c)
+    pda = pda.fillna(method='ffill')
+    pda = pda.fillna(method='backfill')
+    plt.plot(pda['X'], pda['Y'], c='blue')
     plt.axis('equal')
     plt.show()

@@ -2,7 +2,13 @@ import torch
 import pandas as pd
 import numpy as np
 from pandas import DataFrame
-
+from argoverse.map_representation.map_api import ArgoverseMap
+am = ArgoverseMap()  # map 操作对象
+from argoverse.data_loading.argoverse_forecasting_loader import ArgoverseForecastingLoader
+# 设置路径
+root_dir = '../forecasting_sample/data/'
+afl = ArgoverseForecastingLoader(root_dir)  # loader对象
+print('Total number of sequences:',len(afl))  # 文件夹中的seq，即数据文件的数量
 
 # 以下是关于对labeldata进行处理的测试
 # x = DataFrame([[0.2, 0.3],

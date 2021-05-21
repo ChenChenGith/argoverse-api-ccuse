@@ -10,6 +10,9 @@ from torch import nn
 from chenchencode.arg_customized import data_loader_customized
 from chenchencode.arg_customized import torch_treat
 import os
+import random
+
+teacher_forcing_ratio = 0.5
 
 
 class Data_read(data_.Dataset):
@@ -29,9 +32,9 @@ class Data_read(data_.Dataset):
 
     def __getitem__(self, idx):
         data_reader = data_loader_customized(self.file_path_list[idx])
-        raw_data = data_reader.get_all_traj_for_train(return_type='tensor',
-                                                      normalization=True,
-                                                      include_centerline=True)  # TODO:后期需要根据网络形式来更改该函数参数
+        raw_data = data_reader.get_all_traj_for_train_interpolation(return_type='tensor',
+                                                                    normalization=True,
+                                                                    include_centerline=False)  # TODO:后期需要根据网络形式来更改该函数参数
         return raw_data
 
 
@@ -55,12 +58,20 @@ def collate_fn(data_tuple):
 class Encoder(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers, output_size):
         super(Encoder, self).__init__()
+        self.input_s = input_size
+        self.hidden_s = hidden_size
+        self.num_lay = num_layers
+
         self.rnn = nn.LSTM(
             input_size=input_size,
             hidden_size=hidden_size,
             num_layers=num_layers,
             batch_first=True
         )
+        nn.init.normal_(self.rnn.bias_hh_l0)
+        nn.init.normal_(self.rnn.bias_ih_l0)
+        nn.init.orthogonal_(self.rnn.weight_hh_l0)
+        nn.init.orthogonal_(self.rnn.weight_ih_l0)
 
     def forward(self, x):
         lstm_out, hidden_out = self.rnn(x)
@@ -69,12 +80,17 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layer, output_size):
+    def __init__(self, input_size, hidden_size, num_layers, output_size):
         super(Decoder, self).__init__()
+        self.input_s = input_size
+        self.hidden_s = hidden_size
+        self.num_lay = num_layers
+        self.output_s = output_size
+
         self.rnn = nn.LSTM(
             input_size=input_size,
             hidden_size=hidden_size,
-            num_layers=num_layer,
+            num_layers=num_layers,
             batch_first=True
         )
         self.out = nn.Sequential(
@@ -82,6 +98,10 @@ class Decoder(nn.Module):
             nn.Tanh(),
             nn.Linear(hidden_size, output_size)
         )
+        nn.init.normal_(self.rnn.bias_hh_l0)
+        nn.init.normal_(self.rnn.bias_ih_l0)
+        nn.init.orthogonal_(self.rnn.weight_hh_l0)
+        nn.init.orthogonal_(self.rnn.weight_ih_l0)
 
     def forward(self, input, hidden_input):
         lstm_out, hidden_out = self.rnn(input, hidden_input)
@@ -95,15 +115,19 @@ class Seq2seq(nn.Module):
         self.encoder = encoder
         self.decoder = decoder
 
-    def forward(self, x):
-        encoder_out, encoder_hidden = self.encoder(x)
+    def forward(self, know_data, decoder_init):
+        encoder_out, encoder_hidden = self.encoder(know_data)
         decoder_hidden = encoder_hidden
         batch_num = encoder_hidden[0].shape[1]
-        decoder_input = torch.zeros(batch_num, 1, 2)
-        decoder_rec = torch.empty(batch_num,30,2)
+        # decoder_input = torch.zeros(batch_num, 1, self.decoder.input_s)
+        decoder_input = decoder_init[:, 0, :].unsqueeze(-2)
+        decoder_rec = torch.empty(batch_num, 30, self.decoder.output_s)
         for i in range(30):
             decoder_out, decoder_hidden = self.decoder(decoder_input, decoder_hidden)
-            decoder_input = decoder_out
+            if random.random() < teacher_forcing_ratio:
+                decoder_input = decoder_out
+            else:
+                decoder_input = decoder_init[:, i + 1, :].unsqueeze(-2)
             for j in range(batch_num):
                 decoder_rec[j][i] = decoder_out[j]
         return decoder_rec
@@ -122,12 +146,12 @@ if __name__ == '__main__':
     EPOCH = 8
 
     encoder_input_size = 3
-    encoder_hidden_size = 30
+    encoder_hidden_size = 128
     encoder_num_layer = 1
     encoder_output_size = 3
 
     decoder_input_size = 2
-    decoder_hidden_size = 30
+    decoder_hidden_size = encoder_hidden_size
     decoder_num_layer = 1
     decoder_output_size = 2
 
@@ -148,9 +172,8 @@ if __name__ == '__main__':
     for epoch in range(EPOCH):
         for batch_id, (batch_x, batch_y, batch_X_len) in enumerate(data_loader):
             batch_x_pack = rnn_utlils.pack_padded_sequence(batch_x, batch_X_len, batch_first=True)
-            out = net(batch_x_pack)
-            batch_y_treated = torch_treat().label_tensor_treat(out, batch_y)
-            loss = criteria(out, batch_y_treated)
+            out = net(batch_x_pack, batch_y)
+            loss = criteria(out, batch_y[:, 1:, :])
             loss.backward()
             optimizer.step()
             print('epoch:{:2d}, batch_id:{:2d}, loss:{:6.4f}'.format(epoch, batch_id, loss))

@@ -90,7 +90,6 @@ from chenchencode.arg_customized import data_loader_customized
 # Args:
 #     know_num: int, traj data that are known for the prediction
 #     agent_first: bool, chose agent as the prediction target, else AV
-#     forGCN: if true then the outputted know_data will have standard format for each trackID
 #     relative: if true, the coordinates in both train and label data will be mapped to relative values with the start point of agent/AV
 #     normalization: if true, the raw coordinates will be normalized to nearly [0,1] using the norm_range
 #                    note: when normalization=True, relative will be assign to be True.
@@ -101,13 +100,12 @@ from chenchencode.arg_customized import data_loader_customized
 #     include_centerline: if true, the center line will be found and cat with trajectory data.
 #                         note: when include_centerline=True, return_type will be assign to be tensor.              
 # Returns:
-#     train_data: pd.DataFrame(columns = ['TIMESTAMP', 'TRACK_ID', 'X', 'Y']), n*2
-#     label_data: pd.DataFrame(columns = ['TIMESTAMP', 'X', 'Y']), (50-know_num)*2 ,order is in scending time
+#     train_data: pd.DataFrame(columns = [['TIMESTAMP',] 'TRACK_ID', 'X', 'Y']), n*2
+#     label_data: pd.DataFrame(columns = [['TIMESTAMP',] 'X', 'Y']), (50-know_num)*2 ,order is in scending time
 
 fdlc = data_loader_customized(file_path)
 train_data, label_data = fdlc.get_all_traj_for_train(know_num=20, 
-                                                     agent_first=True, 
-                                                     forGCN=False, 
+                                                     agent_first=True,
                                                      relative=False, 
                                                      normalization=False, 
                                                      norm_range=100
@@ -116,70 +114,6 @@ train_data, label_data = fdlc.get_all_traj_for_train(know_num=20,
                                                      return_type='df',
                                                      include_centerline=False)
 ```
-
-**Output:**
-
-**1) <font color=blue>train_data:</font>**
-
-<font color=gray>(*i=0,j=1 if agent_first=True else i=1,j=0*)</font>
-
-If forGCN=**False**:
-
-| index | TIMESTAMP | TRACK_ID | X    | Y    |    |  Description<br>(not in data)  |
-|:----: |:----:     |:----:    |:----:|:----:|----|----|
-|  1    | 0.1       |   i      |   x0 |  y0  | <- | Agent data start|
-|  2    | 0.3       |   i      |   x1 |  y1  |    <-|**<font color=red>note TIMESTAMP=0.2 is missing</font>** |
-|...|...|...|...|...| | |
-|  n=know_num    | 1.9       |   i      |   xn |  yn  | <- | Agent data end|
-|  n+1  | 0.1       |   j      | xn1  | yn1  | <- | AV data start|
-|...|...|...|...|...| |
-|  m=know_num*2| 1.9       |   j      |   xm |  ym  | <- | AV data end|
-| m+1   | 0.1       |   2      |   xm1|  ym1 | <- | next track start |
-|...|...|....|...|...| |
-|...|...|p|...|...| |other track data|
-|...|...|...|...|...| |
-|end|...|track_num|...|...| <- |the last track end|
-
-Example:
-
-![](images/data_loader_customized_false.png)
-
-* If forGCN=**True**:
-
-| index | TIMESTAMP | TRACK_ID | X    | Y    |    |  Description<br>(not in data)  |
-|:----: |:----:     |:----:    |:----:|:----:|----|----|
-|  1    | 0.1       |   i      |   x0 |  y0  | <- | Agent data start|
-|  2    | 0.2       |   i      |   NaN |  NaN  |  <-|**<font color=red>note data of TIMESTAMP=0.2 is added using NaN**
-NaN</font>** |
-|  2    | 0.3       |   i      |   x1 |  y1  |    | |
-|...|...|...|...|...| | |
-|  n    | 1.9       |   i      |   xn |  yn  | <- | Agent data end|
-|  n+1  | 0.1       |   j      | xn1  | yn1  | <- | AV data start|
-|...|...|...|...|...| |
-|  m    | 1.9       |   j      |   xm |  ym  | <- | AV data end|
-| m+1   | 0.1       |   2      |   xm1|  ym1 | <- | next track start |
-|...|...|....|...|...| |
-|...|...|p|...|...| |other track data|
-|...|...|...|...|...| |
-|end|...|track_num|...|...| <- |the last track end|
-
-Example:
-
-![](images/data_loader_customized_True.png)
-
-**2) <font color=blue>label_data:</font>**
-
-| index | TIMESTAMP |  X    | Y    |    |  Description<br>(not in data)  |
-|:----: |:----:     |:----:|:----:|----|----|
-|  1    | 2.0       |    x0 |  y0  | <- | data start|
-|  2    | 2.1       |    NaN |  NaN  |  <-|<font color=red>standard format</font> |
-|  2    | 2.2       |   x1 |  y1  |    | |
-|...|...|...|...| | |
-|  n    | 5.0       |    xn |  yn  | <- | data end, n=50-know_num|.
-
-Example:
-
-![](images/data_loader_customized_label.png)
 
 #### 2.3 Get the trajectory direction (for the surrounding centerline finding)
 
