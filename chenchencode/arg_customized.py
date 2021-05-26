@@ -193,7 +193,7 @@ class data_loader_customized(object):
         if normalization: relative = True
         if range_const == True and range_box is None:
             raise ValueError('need range_box parameters')
-        assert return_type in ['df', 'array', 'tensor'], 'return type should be df or array'
+        assert return_type in ['df', 'array', 'tensor', 'list[tensor]'], 'return type should be df, array or tensor'
         if include_centerline: return_type = 'tensor'
         obj_type = 'AGENT' if agent_first else 'AV'
 
@@ -236,19 +236,23 @@ class data_loader_customized(object):
             x0, y0, angle, city, vehicle_stabale = self.get_main_dirction(agent_first=agent_first)
             re_cl, range_box = find_centerline_veh_coor(x0, y0, angle, city, range_sta=vehicle_stabale).find(
                 output_type='df')
-            know_data = pd.concat((know_data, re_cl[['TRACK_ID', 'X', 'Y']]))
+            re_cl = re_cl[['TRACK_ID', 'X', 'Y']]
+            # know_data = pd.concat((know_data, re_cl))
 
         if relative:  # map the original data to relative values
             know_data['X'] -= x0
             know_data['Y'] -= y0
             label_data['X'] -= x0
             label_data['Y'] -= y0
+            re_cl['X'] -= x0
+            re_cl['Y'] -= y0
 
         if normalization:  # normalizing the raw coordinates
             # know_data['TIMESTAMP'] = know_data['TIMESTAMP'] / norm_range_time
             know_data[['TRACK_ID', 'X', 'Y']] = know_data[['TRACK_ID', 'X', 'Y']] / norm_range_2
             # label_data['TIMESTAMP'] = label_data['TIMESTAMP'] / norm_range_time
             label_data[['X', 'Y']] = label_data[['X', 'Y']] / norm_range_2
+            re_cl[['X', 'Y']] = re_cl[['X', 'Y']] / norm_range_2
 
         if return_type == 'array':
             know_data = np.array(know_data)
@@ -256,6 +260,20 @@ class data_loader_customized(object):
         elif return_type == 'tensor':
             know_data = torch.from_numpy(know_data.values).float()
             label_data = torch.from_numpy(label_data.values).float()
+        elif return_type == 'list[tensor]':
+            ite = know_data['TRACK_ID'].unique()
+            know_data_out = []
+            for i in ite:
+                know_data_out.append(torch.from_numpy(know_data[know_data['TRACK_ID'] == i][['X', 'Y']].values).float())
+
+            ite = re_cl['TRACK_ID'].unique()
+            center_data_out = []
+            for i in ite:
+                center_data_out.append(torch.from_numpy(re_cl[re_cl['TRACK_ID'] == i][['X', 'Y']].values).float())
+
+            label_data = torch.from_numpy(label_data.values).float()
+
+            return (know_data_out, center_data_out, label_data)
 
         return (know_data, label_data)
 
