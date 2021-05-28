@@ -162,7 +162,7 @@ class data_loader_customized(object):
                                norm_range_time=5,
                                norm_range_2=100,
                                range_const=False,
-                               range_box=None,
+                               range_box='default',
                                return_type='df',
                                include_centerline=False) -> (pd.DataFrame, pd.DataFrame):
         """
@@ -191,10 +191,11 @@ class data_loader_customized(object):
         data_point_num = 50
 
         if normalization: relative = True
-        if range_const == True and range_box is None:
-            raise ValueError('need range_box parameters')
+        if range_const == True:
+            if isinstance(range_box, str) and range_box != 'default':
+                assert isinstance(range_box, DataFrame), 'range_box need to be DataFrame'
+                assert range_box.shape == (4,2), 'shape of range box should be (4,2)'
         assert return_type in ['df', 'array', 'tensor', 'list[tensor]'], 'return type should be df, array or tensor'
-        if include_centerline: return_type = 'tensor'
         obj_type = 'AGENT' if agent_first else 'AV'
 
         seq_df = copy.deepcopy(self.seq_df[:])  # copy seq_df
@@ -202,6 +203,12 @@ class data_loader_customized(object):
         seq_df['TIMESTAMP'] = seq_df['TIMESTAMP'].round(1)
         # sometimes, the sample frequency > 0.1s, thus need delete the extra data
         seq_df.drop(seq_df[seq_df['TIMESTAMP'] > max_time].index, inplace=True)
+
+        if include_centerline or (isinstance(range_box, str) and range_box != 'default'):  # 添加周边centerline数据
+            x0, y0, angle, city, vehicle_stabale = self.get_main_dirction(agent_first=agent_first)
+            re_cl, range_box = find_centerline_veh_coor(x0, y0, angle, city, range_sta=vehicle_stabale).find(
+                output_type='df')
+            re_cl = re_cl[['TIMESTAMP', 'TRACK_ID', 'X', 'Y']]
 
         if range_const == True:
             seq_df['index'] = seq_df.index  # reserve index for the merge after shapely operation
@@ -216,66 +223,77 @@ class data_loader_customized(object):
 
         target_data = seq_df[seq_df['OBJECT_TYPE'] == obj_type]
         target_data = pd.merge(standard_df, target_data, left_on='TIMESTAMP', right_on='TIMESTAMP', how='outer')
-        target_data = target_data.interpolate().fillna(method='bfill')  # 插值和bfill填充
+        target_data = target_data.interpolate().fillna(method='bfill').fillna(method='ffill')  # 插值和bfill填充
 
         know_data = pd.concat((target_data[target_data['TIMESTAMP'] < know_num / 10],
                                seq_df[(seq_df['TIMESTAMP'] < know_num / 10) & (seq_df['OBJECT_TYPE'] != obj_type)]))
         know_data['TRACK_ID'] = pd.factorize(know_data['TRACK_ID'])[0]
         know_data = know_data.drop_duplicates(['TIMESTAMP', 'TRACK_ID'])
-        # know_data = know_data[['TIMESTAMP', 'TRACK_ID', 'X', 'Y']]
-        know_data = know_data[['TRACK_ID', 'X', 'Y']]
+        know_data = know_data[['TIMESTAMP', 'TRACK_ID', 'X', 'Y']]
 
-        label_data = target_data[target_data['TIMESTAMP'] >= (know_num - 1) / 10]  # 这里多带了一个已知数据最后一行，用来作为解码器初值
+        label_data = target_data[target_data['TIMESTAMP'] >= know_num / 10]
         label_data = label_data.drop_duplicates('TIMESTAMP')
-        # label_data = label_data[['TIMESTAMP', 'X', 'Y']]
-        label_data = label_data[['X', 'Y']]
+        label_data = label_data[['TIMESTAMP', 'X', 'Y']]
 
         x0, y0 = know_data['X'].iloc[0], know_data['Y'].iloc[0]
-
-        if include_centerline:  # 添加周边centerline数据
-            x0, y0, angle, city, vehicle_stabale = self.get_main_dirction(agent_first=agent_first)
-            re_cl, range_box = find_centerline_veh_coor(x0, y0, angle, city, range_sta=vehicle_stabale).find(
-                output_type='df')
-            re_cl = re_cl[['TRACK_ID', 'X', 'Y']]
-            # know_data = pd.concat((know_data, re_cl))
 
         if relative:  # map the original data to relative values
             know_data['X'] -= x0
             know_data['Y'] -= y0
             label_data['X'] -= x0
             label_data['Y'] -= y0
-            re_cl['X'] -= x0
-            re_cl['Y'] -= y0
+            if include_centerline:
+                re_cl['X'] -= x0
+                re_cl['Y'] -= y0
 
         if normalization:  # normalizing the raw coordinates
-            # know_data['TIMESTAMP'] = know_data['TIMESTAMP'] / norm_range_time
+            know_data['TIMESTAMP'] = know_data['TIMESTAMP'] / norm_range_time
             know_data[['TRACK_ID', 'X', 'Y']] = know_data[['TRACK_ID', 'X', 'Y']] / norm_range_2
-            # label_data['TIMESTAMP'] = label_data['TIMESTAMP'] / norm_range_time
+            label_data['TIMESTAMP'] = label_data['TIMESTAMP'] / norm_range_time
             label_data[['X', 'Y']] = label_data[['X', 'Y']] / norm_range_2
-            re_cl[['X', 'Y']] = re_cl[['X', 'Y']] / norm_range_2
+            if include_centerline:
+                re_cl[['X', 'Y']] = re_cl[['X', 'Y']] / norm_range_2
 
         if return_type == 'array':
+            if include_centerline: know_data = pd.concat((know_data, re_cl))
             know_data = np.array(know_data)
             label_data = np.array(label_data)
         elif return_type == 'tensor':
+            if include_centerline: know_data = pd.concat((know_data, re_cl))
             know_data = torch.from_numpy(know_data.values).float()
             label_data = torch.from_numpy(label_data.values).float()
         elif return_type == 'list[tensor]':
             ite = know_data['TRACK_ID'].unique()
             know_data_out = []
             for i in ite:
-                know_data_out.append(torch.from_numpy(know_data[know_data['TRACK_ID'] == i][['X', 'Y']].values).float())
-
-            ite = re_cl['TRACK_ID'].unique()
-            center_data_out = []
-            for i in ite:
-                center_data_out.append(torch.from_numpy(re_cl[re_cl['TRACK_ID'] == i][['X', 'Y']].values).float())
+                know_data_out.append(torch.from_numpy(know_data[know_data['TRACK_ID'] == i][['TIMESTAMP', 'X', 'Y']].values).float())
 
             label_data = torch.from_numpy(label_data.values).float()
 
-            return (know_data_out, center_data_out, label_data)
+            if include_centerline:
+                ite = re_cl['TRACK_ID'].unique()
+                center_data_out = []
+                for i in ite:
+                    center_data_out.append(torch.from_numpy(re_cl[re_cl['TRACK_ID'] == i][['TIMESTAMP', 'X', 'Y']].values).float())
+
+                return (know_data_out, center_data_out, label_data)
+            return (know_data_out, label_data)
 
         return (know_data, label_data)
+
+        # if forGCN:
+        #     num_track = len(know_data['TRACK_ID'].unique())
+        #     know_data['tmp'] = know_data['TIMESTAMP'] + know_data['TRACK_ID'] * 10
+        #     standard_df = DataFrame(np.tile(np.linspace(0, (know_num - 1) / 10, know_num), num_track),
+        #                             columns=['TIMESTAMP_s']).round(1)
+        #     standard_df['track_tmp'] = np.arange(num_track).repeat(know_num)
+        #     standard_df['TIMESTAMP_s'] = standard_df['track_tmp'] * 10 + standard_df['TIMESTAMP_s']
+        #     standard_know_data = pd.merge(standard_df, know_data, left_on='TIMESTAMP_s', right_on='tmp',
+        #                                   how='outer')
+        #     standard_know_data[['TIMESTAMP', 'TRACK_ID']] = standard_know_data[['TIMESTAMP_s', 'track_tmp']]
+        #     know_data = standard_know_data.groupby('TIMESTAMP_s').mean()
+        #     know_data = know_data[['TIMESTAMP', 'TRACK_ID', 'X', 'Y']]
+        #     know_data['TIMESTAMP'] = know_data['TIMESTAMP'] - know_data['TRACK_ID'] * 10
 
     def get_main_dirction(self, use_point=10, agent_first=True):
         """
@@ -376,7 +394,7 @@ if __name__ == '__main__':
 
     # object establishment
     pd.set_option('max_rows', 300)
-    file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\4791.csv'
+    file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\3861.csv'
     fdlc = data_loader_customized(file_path)
 
     x0, y0, angle, city, vehicle_stabale = fdlc.get_main_dirction(agent_first=True)
@@ -387,15 +405,19 @@ if __name__ == '__main__':
         # display(Polygon(x))
         re_cl_df = DataFrame(x)
         plt.plot(re_cl_df[0], re_cl_df[1], linestyle='-.', c='lightcoral', linewidth=0.4)
+        plt.scatter(re_cl_df[0].iloc[0]+1, re_cl_df[1].iloc[0]+1, marker='o', s=20, c='forestgreen')
+        plt.scatter(re_cl_df[0].iloc[-1], re_cl_df[1].iloc[-1], marker='x', s=20, c='darkorange')
     plt.plot(range_box[0], range_box[1], c='crimson', linestyle='--')
 
-    kd, pda = fdlc.get_all_traj_for_train(agent_first=False, normalization=False, range_const=True,
+    kd, pda = fdlc.get_all_traj_for_train(agent_first=True, normalization=False, range_const=True,
                                           range_box=range_box, include_centerline=False)
     g = kd.groupby('TRACK_ID')
     for name, data in g:
         c = 'black' if name != 0 else 'red'
         plt.plot(data['X'], data['Y'], c=c, linewidth=0.8)
         plt.scatter(data['X'].iloc[0], data['Y'].iloc[0], marker='o', s=10, c=c)
+        # if name==0:
+        #     plt.scatter(data['X'], data['Y'], c=c, linewidth=0.8)
     pda = pda.fillna(method='ffill')
     pda = pda.fillna(method='backfill')
     plt.plot(pda['X'], pda['Y'], c='blue')
