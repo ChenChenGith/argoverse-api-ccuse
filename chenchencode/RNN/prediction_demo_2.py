@@ -16,6 +16,7 @@ from chenchencode.arg_customized import data_loader_customized
 from chenchencode.arg_customized import torch_treat
 import os
 import random
+from torchviz import make_dot
 
 import sys
 
@@ -75,7 +76,7 @@ class Encoder(nn.Module):
         # self.nn_x2_5 = nn.Linear(in_features=self.fc_in, out_features=self.out_ch_final)
 
     def forward(self, x1, x2):
-        input = x1[0]
+        input = x1[0][0].unsqueeze(0)
         out, (h_n, c_n) = self.nn_x1_5(input)
 
         return (h_n, c_n)
@@ -143,10 +144,10 @@ class Decoder(nn.Module):
 
 
 class Seq2Seq(nn.Module):
-    def __init__(self, batch_size):
+    def __init__(self, batch_size, encoder, decoder):
         super(Seq2Seq, self).__init__()
-        self.encoder = Encoder()
-        self.decoder = Decoder()
+        self.encoder = encoder
+        self.decoder = decoder
         self.batch_size = batch_size
 
     def forward(self, x1, x2, y, y_st):
@@ -182,15 +183,18 @@ if __name__ == '__main__':
     data = Data_read(file_list)
 
     data_loader = DataLoader(data, batch_size=batch_size, shuffle=True, collate_fn=co_fn)
-    # encoder_net = Encoder()
-    # decoder_net = Decoder()
-    net = Seq2Seq(batch_size=batch_size)
+    encoder_net = Encoder()
+    decoder_net = Decoder()
+    net = Seq2Seq(batch_size=batch_size, encoder=encoder_net, decoder=decoder_net)
     criteria = nn.MSELoss()
     optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
 
-    for epoch in range(20):
+    for epoch in range(1):
         for batch_id, (x1, x2, y, y_st) in enumerate(data_loader):
             pred = net(x1, x2, y, y_st)
+            g = make_dot(pred, params=dict(net.named_parameters()))
+            g.format = "png"
+            g.view()
             loss = criteria(pred, y)
             optimizer.step()
             print('epoch:{:2d}, batch_id:{:2d}, loss:{:6.4f}'.format(epoch, batch_id, loss))

@@ -1,11 +1,12 @@
 import os
-os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+# os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 
 import numpy as np
 import torch
 from torch import nn
 
 import matplotlib.pyplot as plt
+from torchviz import make_dot
 
 """
 Github: Yonv1943 Zen4 Jia1 hao2
@@ -146,8 +147,11 @@ def run_train_lstm():
         weights = torch.tensor(weights, dtype=torch.float32, device=device)
 
     print("Training Start")
-    for e in range(384):
+    for e in range(1):
         out = net(batch_var_x)
+
+        g = make_dot(out)
+        g.view()
 
         # loss = criterion(out, batch_var_y)
         loss = (out - batch_var_y) ** 2 * weights
