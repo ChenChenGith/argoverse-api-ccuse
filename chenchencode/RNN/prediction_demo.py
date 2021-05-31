@@ -127,7 +127,7 @@ class Seq2seq(nn.Module):
             if random.random() < teacher_forcing_ratio:
                 decoder_input = decoder_out
             else:
-                decoder_input = decoder_init[:, i + 1, :].unsqueeze(-2)
+                decoder_input = decoder_init[:, i, :].unsqueeze(-2)
             for j in range(batch_num):
                 decoder_rec[j][i] = decoder_out[j]
         return decoder_rec
@@ -143,9 +143,9 @@ def get_file_path_list(dir_path):
 
 
 if __name__ == '__main__':
-    EPOCH = 8
+    EPOCH = 20
 
-    encoder_input_size = 3
+    encoder_input_size = 4
     encoder_hidden_size = 128
     encoder_num_layer = 1
     encoder_output_size = 3
@@ -173,7 +173,7 @@ if __name__ == '__main__':
         for batch_id, (batch_x, batch_y, batch_X_len) in enumerate(data_loader):
             batch_x_pack = rnn_utlils.pack_padded_sequence(batch_x, batch_X_len, batch_first=True)
             out = net(batch_x_pack, batch_y)
-            loss = criteria(out, batch_y[:, 1:, :])
+            loss = criteria(out, batch_y)
             loss.backward()
             optimizer.step()
             print('epoch:{:2d}, batch_id:{:2d}, loss:{:6.4f}'.format(epoch, batch_id, loss))

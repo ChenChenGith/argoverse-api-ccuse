@@ -233,13 +233,14 @@ class data_loader_customized(object):
 
         label_data = target_data[target_data['TIMESTAMP'] >= know_num / 10]
         label_data = label_data.drop_duplicates('TIMESTAMP')
-        label_data = label_data[['TIMESTAMP', 'X', 'Y']]
+        label_data = label_data[['X', 'Y']]
 
         x0, y0 = know_data['X'].iloc[0], know_data['Y'].iloc[0]
 
         if relative:  # map the original data to relative values
             know_data['X'] -= x0
             know_data['Y'] -= y0
+            know_data['TIMESTAMP'] -= know_num / 10 / 2
             label_data['X'] -= x0
             label_data['Y'] -= y0
             if include_centerline:
@@ -249,7 +250,7 @@ class data_loader_customized(object):
         if normalization:  # normalizing the raw coordinates
             know_data['TIMESTAMP'] = know_data['TIMESTAMP'] / norm_range_time
             know_data[['TRACK_ID', 'X', 'Y']] = know_data[['TRACK_ID', 'X', 'Y']] / norm_range_2
-            label_data['TIMESTAMP'] = label_data['TIMESTAMP'] / norm_range_time
+            # label_data['TIMESTAMP'] = label_data['TIMESTAMP'] / norm_range_time
             label_data[['X', 'Y']] = label_data[['X', 'Y']] / norm_range_2
             if include_centerline:
                 re_cl[['X', 'Y']] = re_cl[['X', 'Y']] / norm_range_2

@@ -51,66 +51,71 @@ def co_fn(data_tuple):
 
 
 class Encoder(nn.Module):
-    def __init__(self, in_ch=3, out_ch_x11=8, out_ch_x12=10, out_ch_x21=8, out_ch_x22=1, fc_in=10, out_ch_final=128):
+    def __init__(self, in_ch=3, out_ch_x11=8, out_ch_x12=3, out_ch_x21=8, out_ch_x22=1, fc_in=10, out_ch_final=128):
         super(Encoder, self).__init__()
-        self.in_channel = in_ch
-        self.out_ch_x11 = out_ch_x11
+        # self.in_channel = in_ch
+        # self.out_ch_x11 = out_ch_x11
         self.out_ch_x12 = out_ch_x12
-        self.out_ch_x21 = out_ch_x21
-        self.out_ch_x22 = out_ch_x22
-        self.fc_in = fc_in
+        # self.out_ch_x21 = out_ch_x21
+        # self.out_ch_x22 = out_ch_x22
+        # self.fc_in = fc_in
         self.out_ch_final = out_ch_final
 
-        self.nn_x1_1 = nn.Conv1d(in_channels=self.in_channel, out_channels=self.out_ch_x11, kernel_size=1)
-        self.nn_x1_2 = nn.Tanh()
-        self.nn_x1_3 = nn.Conv1d(in_channels=self.out_ch_x11, out_channels=self.out_ch_x12, kernel_size=3, padding=1)
-        self.nn_x1_4 = nn.LeakyReLU()
+        # self.nn_x1_1 = nn.Conv1d(in_channels=self.in_channel, out_channels=self.out_ch_x11, kernel_size=1)
+        # self.nn_x1_2 = nn.Tanh()
+        # self.nn_x1_3 = nn.Conv1d(in_channels=self.out_ch_x11, out_channels=self.out_ch_x12, kernel_size=3, padding=1)
+        # self.nn_x1_4 = nn.LeakyReLU()
         self.nn_x1_5 = nn.LSTM(input_size=self.out_ch_x12, hidden_size=self.out_ch_final, num_layers=1,
                                batch_first=True)
 
-        self.nn_x2_1 = nn.Conv1d(in_channels=self.in_channel, out_channels=self.out_ch_x21, kernel_size=1)
-        self.nn_x2_2 = nn.Tanh()
-        self.nn_x2_3 = nn.Conv1d(in_channels=self.out_ch_x21, out_channels=self.out_ch_x22, kernel_size=3, padding=1)
-        self.nn_x2_4 = nn.LeakyReLU()
-        self.nn_x2_5 = nn.Linear(in_features=self.fc_in, out_features=self.out_ch_final)
+        # self.nn_x2_1 = nn.Conv1d(in_channels=self.in_channel, out_channels=self.out_ch_x21, kernel_size=1)
+        # self.nn_x2_2 = nn.Tanh()
+        # self.nn_x2_3 = nn.Conv1d(in_channels=self.out_ch_x21, out_channels=self.out_ch_x22, kernel_size=3, padding=1)
+        # self.nn_x2_4 = nn.LeakyReLU()
+        # self.nn_x2_5 = nn.Linear(in_features=self.fc_in, out_features=self.out_ch_final)
 
     def forward(self, x1, x2):
-        batch_num = len(x1)
-        final_out = torch.empty(batch_num, self.out_ch_final)
-        for batch_i in range(batch_num):
-            traj_data = x1[batch_i]
-            center_data = x2[batch_i]
-            traj_num, center_num = len(traj_data), len(center_data)
-            mid_out = torch.empty(traj_num + center_num, self.out_ch_final)
-            for i in range(traj_num):
-                input = traj_data[i].permute(1, 0).unsqueeze(0)
-                y = self.nn_x1_1(input)
-                y = self.nn_x1_2(y)
-                y = self.nn_x1_3(y)
-                y = self.nn_x1_4(y)
-                y = y.permute(0, 2, 1)
-                out, (h_n, c_n) = self.nn_x1_5(y)
-                mid_out[i] = c_n.squeeze(-2)
-                if i == 0:
-                    h_n_reserve = h_n
-            for i in range(center_num):
-                input = center_data[i].permute(1, 0).unsqueeze(0)
-                y = self.nn_x2_1(input)
-                y = self.nn_x2_2(y)
-                y = self.nn_x2_3(y)
-                y = self.nn_x2_4(y)
-                y = y.squeeze(-1)
-                out = self.nn_x2_5(y)
-                mid_out[traj_num + i] = out.squeeze(-2)
+        input = x1[0]
+        out, (h_n, c_n) = self.nn_x1_5(input)
 
-            attention_weight = F.softmax(mid_out, dim=0)
-            mid_out = torch.mul(attention_weight, mid_out).sum(0)
+        return (h_n, c_n)
 
-            final_out[batch_i] = mid_out
-
-        final_out = final_out.unsqueeze(0)
-
-        return final_out, h_n_reserve
+        # batch_num = len(x1)
+        # final_out = torch.empty(batch_num, self.out_ch_final)
+        # for batch_i in range(batch_num):
+        #     traj_data = x1[batch_i]
+        #     center_data = x2[batch_i]
+        #     traj_num, center_num = len(traj_data), len(center_data)
+        #     mid_out = torch.empty(traj_num + center_num, self.out_ch_final)
+        #     for i in range(traj_num):
+        #         input = traj_data[i].permute(1, 0).unsqueeze(0)
+        #         y = self.nn_x1_1(input)
+        #         y = self.nn_x1_2(y)
+        #         y = self.nn_x1_3(y)
+        #         y = self.nn_x1_4(y)
+        #         y = y.permute(0, 2, 1)
+        #         out, (h_n, c_n) = self.nn_x1_5(y)
+        #         mid_out[i] = c_n.squeeze(-2)
+        #         if i == 0:
+        #             h_n_reserve = h_n
+        #     for i in range(center_num):
+        #         input = center_data[i].permute(1, 0).unsqueeze(0)
+        #         y = self.nn_x2_1(input)
+        #         y = self.nn_x2_2(y)
+        #         y = self.nn_x2_3(y)
+        #         y = self.nn_x2_4(y)
+        #         y = y.squeeze(-1)
+        #         out = self.nn_x2_5(y)
+        #         mid_out[traj_num + i] = out.squeeze(-2)
+        #
+        #     attention_weight = F.softmax(mid_out, dim=0)
+        #     mid_out = torch.mul(attention_weight, mid_out).sum(0)
+        #
+        #     final_out[batch_i] = mid_out
+        #
+        # final_out = final_out.unsqueeze(0)
+        #
+        # return final_out, h_n_reserve
 
 
 class Decoder(nn.Module):
