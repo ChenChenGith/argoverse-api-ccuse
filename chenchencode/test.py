@@ -30,11 +30,11 @@ if __name__ == '__main__':
     net = nn.LSTM(6, 9, 1)
     print(net)
     out = net(train_x)
-    g = make_dot(out[0])
-    g.view()
+    # g = make_dot(out[0])
+    # g.view()
 
-    # torch.onnx.export(net, train_x, 'viz.pt')
-    # netron.start('viz.pt')
+    torch.onnx.export(net, train_x, 'viz.pt')
+    netron.start('viz.pt')
 
 
 

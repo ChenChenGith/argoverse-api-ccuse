@@ -12,17 +12,18 @@ from torch.utils.data import DataLoader
 import torch.nn.utils.rnn as rnn_utlils
 import torch.nn.functional as F
 from torch import nn
+
 from chenchencode.arg_customized import data_loader_customized
 from chenchencode.arg_customized import torch_treat
 import os
 import random
+import netron
 
 import sys
 
 print(sys.path)
 
 teacher_forcing_ratio = 0.5
-learning_rate = 0.0001
 
 
 class Data_read(data_.Dataset):
@@ -51,7 +52,7 @@ def co_fn(data_tuple):
 
 
 class Encoder(nn.Module):
-    def __init__(self, in_ch=3, out_ch_x11=8, out_ch_x12=10, out_ch_x21=8, out_ch_x22=1, fc_in=10, out_ch_final=128):
+    def __init__(self, in_ch=3, out_ch_x11=8, out_ch_x12=8, out_ch_x21=8, out_ch_x22=1, fc_in=8, out_ch_final=64):
         super(Encoder, self).__init__()
         self.in_channel = in_ch
         self.out_ch_x11 = out_ch_x11
@@ -70,7 +71,7 @@ class Encoder(nn.Module):
 
         self.nn_x2_1 = nn.Conv1d(in_channels=self.in_channel, out_channels=self.out_ch_x21, kernel_size=1)
         self.nn_x2_2 = nn.Tanh()
-        self.nn_x2_3 = nn.Conv1d(in_channels=self.out_ch_x21, out_channels=self.out_ch_x22, kernel_size=3, padding=1)
+        self.nn_x2_3 = nn.Conv1d(in_channels=self.out_ch_x21, out_channels=self.out_ch_x22, kernel_size=3)
         self.nn_x2_4 = nn.LeakyReLU()
         self.nn_x2_5 = nn.Linear(in_features=self.fc_in, out_features=self.out_ch_final)
 
@@ -114,7 +115,7 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, in_ch=2, fc_out=16, lstm_ch_hidden=128, out_ch_final=2):
+    def __init__(self, in_ch=2, fc_out=16, lstm_ch_hidden=64, out_ch_final=2):
         super(Decoder, self).__init__()
         self.in_ch = in_ch
         self.fc_out = fc_out
@@ -138,10 +139,10 @@ class Decoder(nn.Module):
 
 
 class Seq2Seq(nn.Module):
-    def __init__(self, batch_size):
+    def __init__(self, batch_size, encoder, decoder):
         super(Seq2Seq, self).__init__()
-        self.encoder = Encoder()
-        self.decoder = Decoder()
+        self.encoder = encoder
+        self.decoder = decoder
         self.batch_size = batch_size
 
     def forward(self, x1, x2, y, y_st):
@@ -151,7 +152,7 @@ class Seq2Seq(nn.Module):
         decoder_hidden = (h_n, encoder_out)
         for i in range(30):
             decoder_out, decoder_hidden = self.decoder(decoder_input, decoder_hidden)
-            if True:  # random.random() < teacher_forcing_ratio:
+            if random.random() < teacher_forcing_ratio:
                 decoder_input = decoder_out
             else:
                 decoder_input = y[:, i, :].unsqueeze(-2)
@@ -171,22 +172,39 @@ def get_file_path_list(dir_path):
 
 
 if __name__ == '__main__':
+    learning_rate = 0.0001
+
     batch_size = 1
 
     file_list = get_file_path_list(r'e:\argoverse-api-ccuse\forecasting_sample\data')
     data = Data_read(file_list)
 
     data_loader = DataLoader(data, batch_size=batch_size, shuffle=True, collate_fn=co_fn)
-    # encoder_net = Encoder()
-    # decoder_net = Decoder()
-    net = Seq2Seq(batch_size=batch_size)
+    encoder_net = Encoder()
+    decoder_net = Decoder()
+    net = Seq2Seq(batch_size=batch_size, encoder=encoder_net, decoder=decoder_net)
     criteria = nn.MSELoss()
     optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=100, )
 
-    for epoch in range(20):
+    loss_all = 0
+    stop_label = 0
+    e = 1
+    while stop_label == 0:
         for batch_id, (x1, x2, y, y_st) in enumerate(data_loader):
             pred = net(x1, x2, y, y_st)
             loss = criteria(pred, y)
+            loss.backward()
             optimizer.step()
-            print('epoch:{:2d}, batch_id:{:2d}, loss:{:6.4f}'.format(epoch, batch_id, loss))
-            pass
+            scheduler.step(loss)
+            e += 1
+            loss_all += loss
+            if e % 10 == 0:  # 每 100 次输出结果
+                print('Epoch: {}, Loss: {:.5f}, ave loss: {:.5f}, lr: {:.10f}'.format(e + 1, loss.item(),
+                                                                                      loss_all / (e + 1),
+                                                                                      optimizer.param_groups[0]['lr']))
+            if loss < 0.001:
+                stop_label = 1
+
+    # torch.onnx.export(net, (x1, x2, y, y_st), 'viz.pt', opset_version=11)
+    # netron.start('viz.pt')
