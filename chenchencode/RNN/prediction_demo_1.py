@@ -5,6 +5,8 @@
 #                                                                ^
 #                                           自车轨迹最后一点坐标 (x_n,y_n)
 
+# 20210614 修改： 发现使用mseloss会导致所有的点都学习到均值：因为这样确实是loss最小的情况，但不是想要的结果，所以考虑引入方差
+
 
 import torch
 import torch.utils.data as data_
@@ -77,7 +79,7 @@ class Encoder(nn.Module):
 
     def forward(self, x1, x2):
         batch_num = len(x1)
-        final_out = torch.empty(batch_num, self.out_ch_final)
+        final_out = []
         for batch_i in range(batch_num):
             traj_data = x1[batch_i]
             center_data = x2[batch_i]
@@ -92,8 +94,6 @@ class Encoder(nn.Module):
                 y = y.permute(0, 2, 1)
                 out, (h_n, c_n) = self.nn_x1_5(y)
                 mid_out[i] = c_n.squeeze(-2)
-                if i == 0:
-                    h_n_reserve = h_n
             for i in range(center_num):
                 input = center_data[i].permute(1, 0).unsqueeze(0)
                 y = self.nn_x2_1(input)
@@ -104,14 +104,12 @@ class Encoder(nn.Module):
                 out = self.nn_x2_5(y)
                 mid_out[traj_num + i] = out.squeeze(-2)
 
-            attention_weight = F.softmax(mid_out, dim=0)
-            mid_out = torch.mul(attention_weight, mid_out).sum(0)
+            # attention_weight = F.softmax(mid_out, dim=0)
+            # mid_out = torch.mul(attention_weight, mid_out).sum(0)
 
-            final_out[batch_i] = mid_out
+            final_out.append(mid_out)
 
-        final_out = final_out.unsqueeze(0)
-
-        return final_out, h_n_reserve
+        return final_out
 
 
 class Decoder(nn.Module):
@@ -138,26 +136,53 @@ class Decoder(nn.Module):
         return lstm_out, hidden_out
 
 
+class Attention_net(nn.Module):
+    def __init__(self, input_ch=64, mid_out_ch=64):
+        super(Attention_net, self).__init__()
+        self.input_ch = input_ch
+        self.mid_out_ch = mid_out_ch
+        self.out_ch = 1
+
+        self.ln1 = nn.Linear(in_features=self.input_ch, out_features=self.mid_out_ch, bias=False)
+        self.ln2 = nn.Linear(in_features=self.input_ch, out_features=self.mid_out_ch, bias=False)
+        self.ln3 = nn.Linear(in_features=self.mid_out_ch, out_features=self.out_ch, bias=False)
+
+    def forward(self, encoder_h, decoder_h):
+        out_s = self.ln1(encoder_h)
+        out_h = self.ln2(decoder_h)
+        out = self.ln3(out_h + out_s)
+        weight = F.softmax(out)
+        out = torch.mul(weight, encoder_h).sum(0)
+
+        return out
+
+
 class Seq2Seq(nn.Module):
-    def __init__(self, batch_size, encoder, decoder):
+    def __init__(self, batch_size, encoder, decoder, attention):
         super(Seq2Seq, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
+        self.attention = attention
         self.batch_size = batch_size
 
     def forward(self, x1, x2, y, y_st):
-        encoder_out, h_n = self.encoder(x1, x2)
-        decoder_input = y_st
+        encoder_out = self.encoder(x1, x2)  # list([[],[],..])
+        init_hn = torch.zeros(self.batch_size, 1, self.decoder.lstm_ch_hidden)
         decoder_rec = torch.empty(self.batch_size, 30, 2)
-        decoder_hidden = (h_n, encoder_out)
-        for i in range(30):
-            decoder_out, decoder_hidden = self.decoder(decoder_input, decoder_hidden)
-            if random.random() < teacher_forcing_ratio:
-                decoder_input = decoder_out
-            else:
-                decoder_input = y[:, i, :].unsqueeze(-2)
-            for j in range(self.batch_size):
-                decoder_rec[j][i] = decoder_out[j]
+        for j in range(batch_size):
+            out_encoder = encoder_out[j]
+            decoder_hi = self.attention(out_encoder, init_hn)
+            decoder_input = y_st
+            init_ci = torch.zeros(self.batch_size, 1, self.decoder.lstm_ch_hidden)
+            for i in range(30):
+                decoder_out, (decoder_hi, decoder_ci) = self.decoder(decoder_input, (decoder_hi, init_ci))
+                decoder_hi = self.attention(out_encoder, decoder_hi)
+                if random.random() < teacher_forcing_ratio:
+                    decoder_input = decoder_out
+                else:
+                    decoder_input = y[:, i, :].unsqueeze(-2)
+                for j in range(self.batch_size):
+                    decoder_rec[j][i] = decoder_out[j]
 
         return decoder_rec
 
@@ -172,6 +197,7 @@ def get_file_path_list(dir_path):
 
 
 if __name__ == '__main__':
+    loss_version = 1
     learning_rate = 0.0001
 
     batch_size = 1
@@ -182,6 +208,7 @@ if __name__ == '__main__':
     data_loader = DataLoader(data, batch_size=batch_size, shuffle=True, collate_fn=co_fn)
     encoder_net = Encoder()
     decoder_net = Decoder()
+    attention_net = Attention_net()
     net = Seq2Seq(batch_size=batch_size, encoder=encoder_net, decoder=decoder_net)
     criteria = nn.MSELoss()
     optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
@@ -193,7 +220,12 @@ if __name__ == '__main__':
     while stop_label == 0:
         for batch_id, (x1, x2, y, y_st) in enumerate(data_loader):
             pred = net(x1, x2, y, y_st)
-            loss = criteria(pred, y)
+            if loss_version == 0:  # 仅MSELoss
+                loss = criteria(pred, y)
+            elif loss_version == 1:
+                # loss_var = torch.abs(pred.var(1) - y.var(1)).sum()
+                loss_mean = torch.sqrt(criteria(pred, y))
+                loss = loss_mean
             loss.backward()
             optimizer.step()
             scheduler.step(loss)

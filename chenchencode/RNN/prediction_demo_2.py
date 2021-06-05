@@ -189,6 +189,7 @@ class Acce_trainer(nn.Module):
 
 
 if __name__ == '__main__':
+    test_version = 0
     learning_rate = 0.0001
 
     batch_size = 1
@@ -199,8 +200,11 @@ if __name__ == '__main__':
     data_loader = DataLoader(data, batch_size=batch_size, shuffle=True, collate_fn=co_fn)
     encoder_net = Encoder()
     decoder_net = Decoder()
-    # net = Seq2Seq(batch_size=batch_size, encoder=encoder_net, decoder=decoder_net)
-    net = Acce_trainer()
+    if test_version == 0:
+        net = Acce_trainer()
+    else:
+        net = Seq2Seq(batch_size=batch_size, encoder=encoder_net, decoder=decoder_net)
+
     criteria = nn.MSELoss()
     optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=100, )
@@ -208,15 +212,18 @@ if __name__ == '__main__':
     loss_all = 0
     stop_label = 0
     e = 1
+
+
     while stop_label == 0:
         for batch_id, (x1, x2, y, y_st) in enumerate(data_loader):
-            x = x1[0][0]
-            y = torch.tensor([0.01296, -0.00015])
-
-            pred = net(x)
-            l1 = torch.abs(pred.max() - y.max())
-            l2 = torch.abs(pred.min() - y.min())
-            loss = criteria(pred, y) + l1 + l2
+            if test_version == 0:
+                # 测试学习加速度
+                x = x1[0][0]
+                y = torch.tensor([0.01296, -0.00015])  # excel计算的速度和加速度
+                pred = net(x)
+                l1 = torch.abs(pred.max() - y.max())  # 最大值、最小值限定
+                l2 = torch.abs(pred.min() - y.min())
+                loss = criteria(pred, y) + l1 + l2
             loss.backward()
             optimizer.step()
             scheduler.step(loss)
