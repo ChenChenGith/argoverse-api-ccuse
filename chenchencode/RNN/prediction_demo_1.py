@@ -145,14 +145,17 @@ class Attention_net(nn.Module):
 
         self.ln1 = nn.Linear(in_features=self.input_ch, out_features=self.mid_out_ch, bias=False)
         self.ln2 = nn.Linear(in_features=self.input_ch, out_features=self.mid_out_ch, bias=False)
-        self.ln3 = nn.Linear(in_features=self.mid_out_ch, out_features=self.out_ch, bias=False)
+        self.ln3 = nn.Tanh()
+        self.ln4 = nn.Linear(in_features=self.mid_out_ch, out_features=self.out_ch, bias=False)
 
     def forward(self, encoder_h, decoder_h):
         out_s = self.ln1(encoder_h)
         out_h = self.ln2(decoder_h)
         out = self.ln3(out_h + out_s)
-        weight = F.softmax(out)
-        out = torch.mul(weight, encoder_h).sum(0)
+        out = self.ln4(out)
+        weight = F.softmax(out, dim=1)
+        out = torch.mul(weight, encoder_h).sum(1)
+        out = out.unsqueeze(0)
 
         return out
 
@@ -169,20 +172,19 @@ class Seq2Seq(nn.Module):
         encoder_out = self.encoder(x1, x2)  # list([[],[],..])
         init_hn = torch.zeros(self.batch_size, 1, self.decoder.lstm_ch_hidden)
         decoder_rec = torch.empty(self.batch_size, 30, 2)
-        for j in range(batch_size):
-            out_encoder = encoder_out[j]
-            decoder_hi = self.attention(out_encoder, init_hn)
+        for j in range(self.batch_size):
+            out_encoder = encoder_out[j].unsqueeze(0)
+            decoder_hi = self.attention(out_encoder, init_hn[j].unsqueeze(0))
             decoder_input = y_st
-            init_ci = torch.zeros(self.batch_size, 1, self.decoder.lstm_ch_hidden)
+            decoder_ci = torch.zeros(self.batch_size, 1, self.decoder.lstm_ch_hidden)
             for i in range(30):
-                decoder_out, (decoder_hi, decoder_ci) = self.decoder(decoder_input, (decoder_hi, init_ci))
+                decoder_out, (decoder_hi, decoder_ci) = self.decoder(decoder_input, (decoder_hi, decoder_ci))
                 decoder_hi = self.attention(out_encoder, decoder_hi)
                 if random.random() < teacher_forcing_ratio:
                     decoder_input = decoder_out
                 else:
-                    decoder_input = y[:, i, :].unsqueeze(-2)
-                for j in range(self.batch_size):
-                    decoder_rec[j][i] = decoder_out[j]
+                    decoder_input = y[j, i, :].reshape(1,1,2)
+                decoder_rec[j][i] = decoder_out[j]
 
         return decoder_rec
 
@@ -195,48 +197,71 @@ def get_file_path_list(dir_path):
             result.append(apath)
     return result
 
+def loss_cal(pred, y, version=0):
+    if loss_version == 0:  # 仅MSELoss，即坐标的曼哈顿距离
+        loss = criteria(pred, y)
+    elif loss_version == 1:  # sqrt(MSE)
+        # loss_var = torch.abs(pred.var(1) - y.var(1)).sum()
+        loss = torch.sqrt(criteria(pred, y))
+    elif loss_version == 2:  # 欧氏距离
+        loss_med = torch.pow(pred - y, 2)
+        loss = loss_med.sum(-1)
+        loss = torch.sqrt(loss).sum() / 30 / 2
+    elif loss_version == 3:  # 欧氏距离+邻接点间距，鼓励离散
+        loss_dis = torch.abs(pred.diff(dim=1) - y.diff(dim=1))
+        loss_dis = loss_dis.sum()
+        loss_med = torch.pow(pred - y, 2)
+        loss_med = loss_med.sum(-1)
+        loss_med = torch.sqrt(loss_med).sum() / 30 / 2
+        loss = loss_dis + loss_med
+    elif loss_version == 4:  # sqrt(MSE)+邻接点间距，鼓励离散
+        loss_dis = torch.abs(pred.diff(dim=1) - y.diff(dim=1))
+        loss_dis = loss_dis.sum()
+        loss = loss_dis + criteria(pred, y)
+
+    return loss
 
 if __name__ == '__main__':
-    loss_version = 1
     learning_rate = 0.0001
 
     batch_size = 1
 
     file_list = get_file_path_list(r'e:\argoverse-api-ccuse\forecasting_sample\data')
     data = Data_read(file_list)
-
     data_loader = DataLoader(data, batch_size=batch_size, shuffle=True, collate_fn=co_fn)
+
     encoder_net = Encoder()
     decoder_net = Decoder()
     attention_net = Attention_net()
-    net = Seq2Seq(batch_size=batch_size, encoder=encoder_net, decoder=decoder_net)
+    net = Seq2Seq(batch_size=batch_size, encoder=encoder_net, decoder=decoder_net, attention=attention_net)
+
     criteria = nn.MSELoss()
     optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=100, )
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=1000, )
 
     loss_all = 0
     stop_label = 0
     e = 1
+    loss_version = 3
     while stop_label == 0:
         for batch_id, (x1, x2, y, y_st) in enumerate(data_loader):
             pred = net(x1, x2, y, y_st)
-            if loss_version == 0:  # 仅MSELoss
-                loss = criteria(pred, y)
-            elif loss_version == 1:
-                # loss_var = torch.abs(pred.var(1) - y.var(1)).sum()
-                loss_mean = torch.sqrt(criteria(pred, y))
-                loss = loss_mean
+            loss = loss_cal(pred, y, loss_version)
+            optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             scheduler.step(loss)
             e += 1
-            loss_all += loss
+            loss_all += float(loss)
             if e % 10 == 0:  # 每 100 次输出结果
                 print('Epoch: {}, Loss: {:.5f}, ave loss: {:.5f}, lr: {:.10f}'.format(e + 1, loss.item(),
                                                                                       loss_all / (e + 1),
                                                                                       optimizer.param_groups[0]['lr']))
+            # del loss
             if loss < 0.001:
                 stop_label = 1
 
     # torch.onnx.export(net, (x1, x2, y, y_st), 'viz.pt', opset_version=11)
     # netron.start('viz.pt')
+
+    torch.save(net, '.\\Saved_model\\net_v1_i670.pkl')
