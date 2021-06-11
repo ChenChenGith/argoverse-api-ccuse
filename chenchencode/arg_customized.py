@@ -221,7 +221,7 @@ class data_loader_customized(object):
 
         standard_df = DataFrame(np.linspace(0, max_time, data_point_num), columns=['TIMESTAMP']).round(1)
 
-        target_data = seq_df[seq_df['OBJECT_TYPE'] == obj_type]
+        target_data = seq_df[seq_df['OBJECT_TYPE'] == obj_type]  # get data of agent or av
         target_data = pd.merge(standard_df, target_data, left_on='TIMESTAMP', right_on='TIMESTAMP', how='outer')
         target_data = target_data.interpolate().fillna(method='bfill').fillna(method='ffill')  # 插值和bfill填充
 
