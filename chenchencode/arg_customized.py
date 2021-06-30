@@ -421,12 +421,12 @@ if __name__ == '__main__':
 
     # object establishment
     pd.set_option('max_rows', 300)
-    file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\3828.csv'
+    file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\4791.csv'
     fdlc = data_loader_customized(file_path)
 
-    x0, y0, angle, city, vehicle_stabale = fdlc.get_main_dirction(agent_first=True)
-    print(vehicle_stabale)
-    re_cl, range_box = find_centerline_veh_coor(x0, y0, angle, city, range_sta=vehicle_stabale).find(output_type='list')
+    x0_out, y0_out, angle_out, city_out, vehicle_stabale_out = fdlc.get_main_dirction(agent_first=True)
+    print(vehicle_stabale_out)
+    re_cl, range_box_out = find_centerline_veh_coor(x0_out, y0_out, angle_out, city_out, range_sta=vehicle_stabale_out).find(output_type='list')
     for i in range(len(re_cl)):
         x = re_cl[i]
         # display(Polygon(x))
@@ -434,9 +434,9 @@ if __name__ == '__main__':
         plt.plot(re_cl_df[0], re_cl_df[1], linestyle='-.', c='lightcoral', linewidth=0.4)
         plt.scatter(re_cl_df[0].iloc[0] + 1, re_cl_df[1].iloc[0] + 1, marker='o', s=20, c='forestgreen')
         plt.scatter(re_cl_df[0].iloc[-1], re_cl_df[1].iloc[-1], marker='x', s=20, c='darkorange')
-    plt.plot(range_box[0], range_box[1], c='crimson', linestyle='--')
+    plt.plot(range_box_out[0], range_box_out[1], c='crimson', linestyle='--')
 
-    kd, pda = fdlc.get_all_traj_for_train(agent_first=True, normalization=False, range_const=False,
+    kd, pda = fdlc.get_all_traj_for_train(agent_first=True, normalization=False, range_const=True,
                                           include_centerline=False)
     g = kd.groupby('TRACK_ID')
     for name, data in g:
