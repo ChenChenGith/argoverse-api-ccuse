@@ -14,7 +14,7 @@ py_path = os.path.dirname(os.path.abspath(__file__))
 
 
 class find_centerline_veh_coor(object):
-    def __init__(self, x0, y0, theta, city, range_front=80, range_back=20, range_side=30, range_sta=False,
+    def __init__(self, x0, y0, theta, city, range_dis_list=[80, 20, 30], range_sta=False,
                  save_path=py_path):
         '''
         Args:
@@ -22,8 +22,7 @@ class find_centerline_veh_coor(object):
             y0: float, vehicle coordinate
             theta: float, vehicle heading angle, in radian
             city: str, city name, 'PIT' or 'MIA'
-            range_front: float, search range in front of the vehicle
-            range_back: float, search range in the back of the vehicle
+            range_dis_list: list, ranges for finding centerline, [range_front, range_back, range_side]
             range_sta: if true, means that the vehicle is amost stationary, all the range value will be set to 20
             save_path: str, path to save the rebuilt centerline in Shaple format
         Returns:  Object.find()
@@ -33,7 +32,7 @@ class find_centerline_veh_coor(object):
         self.x0, self.y0, self.theta = x0, y0, theta
         self.center_point = Point([x0, y0])
         if not range_sta:
-            self.range_front, self.range_back, self.range_side = range_front, range_back, range_side
+            self.range_front, self.range_back, self.range_side = range_dis_list
         else:
             self.range_front, self.range_back, self.range_side = 20, 20, 20
         self.city = city
@@ -59,6 +58,8 @@ class find_centerline_veh_coor(object):
 
         self.polygon = polygon
         self.range_box = tmpp
+
+        return self.range_box
 
     def rotation_mat(self):
         '''calculate the rotation matrix'''
@@ -103,6 +104,9 @@ class find_centerline_veh_coor(object):
         '''
         Args:
             output_type: which type of output will be: ['list', 'df', 'tensor']
+        Returns:  Object.find()
+            surr_centerline: np.array(m,m,3), the surrounding centerline coordinates
+            range_box: np.array(4,3), the range box coordinates
         '''
         est_id = []
         est_dis = []
@@ -130,7 +134,6 @@ class find_centerline_veh_coor(object):
                     i += 1
                 else:
                     re_cl = pd.concat((re_cl, cl), axis=0)
-            pass
         else:
             re_cl = [self.line_set_array[lane_id] for lane_id in est_id]
 
@@ -157,12 +160,11 @@ class data_loader_customized(object):
     def get_all_traj_for_train(self,
                                know_num=20,
                                agent_first=True,
-                               relative=False,
                                normalization=False,
                                norm_range_time=5,
-                               norm_range_2=100,
+                               norm_range=100,
                                range_const=False,
-                               range_box='default',
+                               range_dis_list='default',
                                return_type='df',
                                include_centerline=False) -> (pd.DataFrame, pd.DataFrame):
         """
@@ -171,15 +173,13 @@ class data_loader_customized(object):
         Args:
             know_num: int, traj data that are known for the prediction
             agent_first: bool, chose agent as the prediction target, else AV
-            relative: if true, the coordinates in both train and label data will be mapped to relative values with the start point of agent/AV
             normalization: if true, the raw coordinates will be normalized to nearly [0,1] using the norm_range
-                           note: when normalization=True, relative will be assign to be True.
             norm_range_time: used for the normalization on TIMESTAMP
-            norm_range_2: used for the normalization on [TRACKID,X,Y]. points whose distance between the first point of agent/AV is equal to norm_range, then it will map to 1
-            range_const: if true, only the coordinates in the range_box are extracted
-            range_box: the four point of the range
+            norm_range: used for the normalization on [TRACKID,X,Y]. points whose distance between the first point of agent/AV is equal to norm_range, then it will map to 1
+            range_const: if true, only the coordinates in the range_dis_list are extracted
+            range_dis_list: [range_front, range_back, range_side] the range used in finding surrounding centerline
             return_type: to chose the outputs' format, [dataframe, array, tensor]
-            include_centerline: if true, the center line will be found and cat with trajectory data.
+            include_centerline: if true, the center line will be found.
                                 note: when include_centerline=True, return_type will be assign to be tensor.
         Returns:
             train_data: pd.DataFrame(columns = ['TIMESTAMP', 'TRACK_ID', 'X', 'Y']), n*2
@@ -187,39 +187,50 @@ class data_loader_customized(object):
             all of the output are interpolated
         """
 
-        max_time = 4.9
-        data_point_num = 50
+        self.max_time = 4.9
+        self.data_point_num = 50
+        self.know_num, self.norm_range_time, self.norm_range = know_num, norm_range_time, norm_range
 
-        if normalization: relative = True
         if range_const == True:
-            if isinstance(range_box, str) and range_box != 'default':
-                assert isinstance(range_box, DataFrame), 'range_box need to be DataFrame'
-                assert range_box.shape == (4,2), 'shape of range box should be (4,2)'
-        assert return_type in ['df', 'array', 'tensor', 'list[tensor]'], 'return type should be df, array or tensor'
+            if isinstance(range_dis_list, str):
+                assert range_dis_list == 'default', 'range_dis_list is needed'
+                range_dis_list = [80, 20, 30]
+            else:
+                assert isinstance(range_dis_list, list), 'range_dis_list need to be DataFrame'
+                assert len(range_dis_list) == 3, 'shape of range box should be (4,2)'
+        assert return_type in ['df', 'array', 'tensor',
+                               'list[tensor]'], 'return type should be df, array, tensor or list[tensor]'
         obj_type = 'AGENT' if agent_first else 'AV'
 
         seq_df = copy.deepcopy(self.seq_df[:])  # copy seq_df
         seq_df['TIMESTAMP'] -= seq_df['TIMESTAMP'][0]  # time normalization
         seq_df['TIMESTAMP'] = seq_df['TIMESTAMP'].round(1)
         # sometimes, the sample frequency > 0.1s, thus need delete the extra data
-        seq_df.drop(seq_df[seq_df['TIMESTAMP'] > max_time].index, inplace=True)
+        seq_df.drop(seq_df[seq_df['TIMESTAMP'] > self.max_time].index, inplace=True)
 
-        if include_centerline or (isinstance(range_box, str) and range_box != 'default'):  # 添加周边centerline数据
+        if include_centerline:  # add centerline information
             x0, y0, angle, city, vehicle_stabale = self.get_main_dirction(agent_first=agent_first)
-            re_cl, range_box = find_centerline_veh_coor(x0, y0, angle, city, range_sta=vehicle_stabale).find(
-                output_type='df')
+            re_cl, range_box = find_centerline_veh_coor(x0, y0, angle, city, range_dis_list=range_dis_list,
+                                                        range_sta=vehicle_stabale).find(output_type='df')
             re_cl = re_cl[['TIMESTAMP', 'TRACK_ID', 'X', 'Y']]
 
         if range_const == True:
             seq_df['index'] = seq_df.index  # reserve index for the merge after shapely operation
+            try:
+                range_box_np = range_box.to_numpy()
+            except:
+                x0, y0, angle, city, vehicle_stabale = self.get_main_dirction(agent_first=agent_first)
+                range_box = find_centerline_veh_coor(x0, y0, angle, city, range_dis_list=range_dis_list,
+                                                     range_sta=vehicle_stabale).range_box
+                range_box_np = range_box.to_numpy()
             tmp_inrange = np.array(
-                Polygon(range_box.to_numpy()).intersection(MultiPoint(seq_df[['X', 'Y', 'index']].to_numpy())))
+                Polygon(range_box_np).intersection(MultiPoint(seq_df[['X', 'Y', 'index']].to_numpy())))
             tmp_q = DataFrame(index=tmp_inrange[:, 2])
             seq_df = pd.merge(seq_df, tmp_q, left_index=True, right_index=True, how='inner')
 
         seq_df.sort_values(['OBJECT_TYPE', 'TRACK_ID', 'TIMESTAMP'], inplace=True)
 
-        standard_df = DataFrame(np.linspace(0, max_time, data_point_num), columns=['TIMESTAMP']).round(1)
+        standard_df = DataFrame(np.linspace(0, self.max_time, self.data_point_num), columns=['TIMESTAMP']).round(1)
 
         target_data = seq_df[seq_df['OBJECT_TYPE'] == obj_type]  # get data of agent or av
         target_data = pd.merge(standard_df, target_data, left_on='TIMESTAMP', right_on='TIMESTAMP', how='outer')
@@ -235,25 +246,30 @@ class data_loader_customized(object):
         label_data = label_data.drop_duplicates('TIMESTAMP')
         label_data = label_data[['X', 'Y']]
 
-        x0, y0 = know_data['X'].iloc[0], know_data['Y'].iloc[0]
+        self.raw_label_data = label_data  # 保存原始真值
 
-        if relative:  # map the original data to relative values
-            know_data['X'] -= x0
-            know_data['Y'] -= y0
-            know_data['TIMESTAMP'] -= know_num / 10 / 2
-            label_data['X'] -= x0
-            label_data['Y'] -= y0
-            if include_centerline:
-                re_cl['X'] -= x0
-                re_cl['Y'] -= y0
+        self.x0, self.y0 = target_data['X'].iloc[0], target_data['Y'].iloc[0]
 
         if normalization:  # normalizing the raw coordinates
-            know_data['TIMESTAMP'] = know_data['TIMESTAMP'] / norm_range_time
-            know_data[['TRACK_ID', 'X', 'Y']] = know_data[['TRACK_ID', 'X', 'Y']] / norm_range_2
-            # label_data['TIMESTAMP'] = label_data['TIMESTAMP'] / norm_range_time
-            label_data[['X', 'Y']] = label_data[['X', 'Y']] / norm_range_2
-            if include_centerline:
-                re_cl[['X', 'Y']] = re_cl[['X', 'Y']] / norm_range_2
+            know_data = self.standardization(know_data)
+            label_data = self.standardization(label_data)
+            if include_centerline: re_cl = self.standardization(re_cl)
+
+            # know_data['X'] -= self.x0
+            # know_data['Y'] -= self.y0
+            # know_data['TIMESTAMP'] -= know_num / 10 / 2
+            # label_data['X'] -= self.x0
+            # label_data['Y'] -= self.y0
+            # if include_centerline:
+            #     re_cl['X'] -= self.x0
+            #     re_cl['Y'] -= self.y0
+            #
+            # know_data['TIMESTAMP'] = know_data['TIMESTAMP'] / norm_range_time
+            # know_data[['TRACK_ID', 'X', 'Y']] = know_data[['TRACK_ID', 'X', 'Y']] / norm_range
+            # # label_data['TIMESTAMP'] = label_data['TIMESTAMP'] / norm_range_time
+            # label_data[['X', 'Y']] = label_data[['X', 'Y']] / norm_range
+            # if include_centerline:
+            #     re_cl[['X', 'Y']] = re_cl[['X', 'Y']] / norm_range
 
         if return_type == 'array':
             if include_centerline: know_data = pd.concat((know_data, re_cl))
@@ -267,7 +283,8 @@ class data_loader_customized(object):
             ite = know_data['TRACK_ID'].unique()
             know_data_out = []
             for i in ite:
-                know_data_out.append(torch.from_numpy(know_data[know_data['TRACK_ID'] == i][['TIMESTAMP', 'X', 'Y']].values).float())
+                know_data_out.append(
+                    torch.from_numpy(know_data[know_data['TRACK_ID'] == i][['TIMESTAMP', 'X', 'Y']].values).float())
 
             label_data = torch.from_numpy(label_data.values).float()
 
@@ -275,26 +292,35 @@ class data_loader_customized(object):
                 ite = re_cl['TRACK_ID'].unique()
                 center_data_out = []
                 for i in ite:
-                    center_data_out.append(torch.from_numpy(re_cl[re_cl['TRACK_ID'] == i][['TIMESTAMP', 'X', 'Y']].values).float())
+                    center_data_out.append(
+                        torch.from_numpy(re_cl[re_cl['TRACK_ID'] == i][['TIMESTAMP', 'X', 'Y']].values).float())
 
                 return (know_data_out, center_data_out, label_data)
             return (know_data_out, label_data)
 
         return (know_data, label_data)
 
-        # if forGCN:
-        #     num_track = len(know_data['TRACK_ID'].unique())
-        #     know_data['tmp'] = know_data['TIMESTAMP'] + know_data['TRACK_ID'] * 10
-        #     standard_df = DataFrame(np.tile(np.linspace(0, (know_num - 1) / 10, know_num), num_track),
-        #                             columns=['TIMESTAMP_s']).round(1)
-        #     standard_df['track_tmp'] = np.arange(num_track).repeat(know_num)
-        #     standard_df['TIMESTAMP_s'] = standard_df['track_tmp'] * 10 + standard_df['TIMESTAMP_s']
-        #     standard_know_data = pd.merge(standard_df, know_data, left_on='TIMESTAMP_s', right_on='tmp',
-        #                                   how='outer')
-        #     standard_know_data[['TIMESTAMP', 'TRACK_ID']] = standard_know_data[['TIMESTAMP_s', 'track_tmp']]
-        #     know_data = standard_know_data.groupby('TIMESTAMP_s').mean()
-        #     know_data = know_data[['TIMESTAMP', 'TRACK_ID', 'X', 'Y']]
-        #     know_data['TIMESTAMP'] = know_data['TIMESTAMP'] - know_data['TRACK_ID'] * 10
+    def standardization(self, raw_data: DataFrame):
+        '''
+        Used to standard the data
+        '''
+        raw_data['X'] -= self.x0
+        raw_data['Y'] -= self.y0
+        if 'TRACK_ID' in raw_data.columns:
+            raw_data[['TRACK_ID', 'X', 'Y']] = raw_data[['TRACK_ID', 'X', 'Y']] / self.norm_range
+        else:
+            raw_data[['X', 'Y']] = raw_data[['X', 'Y']] / self.norm_range
+        if 'TIMESTAMP' in raw_data.columns:
+            raw_data['TIMESTAMP'] -= self.know_num / 10 / 2
+            raw_data['TIMESTAMP'] = raw_data['TIMESTAMP'] / self.norm_range_time
+
+        return raw_data
+
+    def de_standardization(self, raw_data: torch.tensor):
+        '''
+        Used to de-standard the predicted coordinates
+        '''
+        return (raw_data * self.norm_range) + torch.tensor([self.x0, self.y0])
 
     def get_main_dirction(self, use_point=10, agent_first=True):
         """
@@ -395,7 +421,7 @@ if __name__ == '__main__':
 
     # object establishment
     pd.set_option('max_rows', 300)
-    file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\3861.csv'
+    file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\3828.csv'
     fdlc = data_loader_customized(file_path)
 
     x0, y0, angle, city, vehicle_stabale = fdlc.get_main_dirction(agent_first=True)
@@ -406,12 +432,12 @@ if __name__ == '__main__':
         # display(Polygon(x))
         re_cl_df = DataFrame(x)
         plt.plot(re_cl_df[0], re_cl_df[1], linestyle='-.', c='lightcoral', linewidth=0.4)
-        plt.scatter(re_cl_df[0].iloc[0]+1, re_cl_df[1].iloc[0]+1, marker='o', s=20, c='forestgreen')
+        plt.scatter(re_cl_df[0].iloc[0] + 1, re_cl_df[1].iloc[0] + 1, marker='o', s=20, c='forestgreen')
         plt.scatter(re_cl_df[0].iloc[-1], re_cl_df[1].iloc[-1], marker='x', s=20, c='darkorange')
     plt.plot(range_box[0], range_box[1], c='crimson', linestyle='--')
 
-    kd, pda = fdlc.get_all_traj_for_train(agent_first=True, normalization=False, range_const=True,
-                                          range_box=range_box, include_centerline=False)
+    kd, pda = fdlc.get_all_traj_for_train(agent_first=True, normalization=False, range_const=False,
+                                          include_centerline=False)
     g = kd.groupby('TRACK_ID')
     for name, data in g:
         c = 'black' if name != 0 else 'red'

@@ -37,9 +37,7 @@ class Data_read(data_.Dataset):
 
     def __getitem__(self, idx):
         data_reader = data_loader_customized(self.file_path_list[idx])
-        raw_data = data_reader.get_all_traj_for_train(return_type='list[tensor]',
-                                                      normalization=True,
-                                                      range_const=True,
+        raw_data = data_reader.get_all_traj_for_train(normalization=True, range_const=True, return_type='list[tensor]',
                                                       include_centerline=True)  # TODO:后期需要根据网络形式来更改该函数参数
 
         return raw_data
