@@ -225,8 +225,10 @@ class data_loader_customized(object):
                 range_box_np = range_box.to_numpy()
             tmp_inrange = np.array(
                 Polygon(range_box_np).intersection(MultiPoint(seq_df[['X', 'Y', 'index']].to_numpy())))
-            tmp_q = DataFrame(index=tmp_inrange[:, 2])
-            seq_df = pd.merge(seq_df, tmp_q, left_index=True, right_index=True, how='inner')
+            tmp_q = DataFrame(tmp_inrange, columns=['X', 'Y', 'index'])
+            seq_df = pd.merge(seq_df, tmp_q, left_on=['X', 'Y'], right_on=['X', 'Y'], how='inner')
+            # tmp_q = DataFrame(index=tmp_inrange[:, 2])
+            # seq_df = pd.merge(seq_df, tmp_q, left_index=True, right_index=True, how='inner')
 
         seq_df.sort_values(['OBJECT_TYPE', 'TRACK_ID', 'TIMESTAMP'], inplace=True)
 
@@ -421,12 +423,13 @@ if __name__ == '__main__':
 
     # object establishment
     pd.set_option('max_rows', 300)
-    file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\4791.csv'
+    file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\3828.csv'
     fdlc = data_loader_customized(file_path)
 
     x0_out, y0_out, angle_out, city_out, vehicle_stabale_out = fdlc.get_main_dirction(agent_first=True)
     print(vehicle_stabale_out)
-    re_cl, range_box_out = find_centerline_veh_coor(x0_out, y0_out, angle_out, city_out, range_sta=vehicle_stabale_out).find(output_type='list')
+    re_cl, range_box_out = find_centerline_veh_coor(x0_out, y0_out, angle_out, city_out,
+                                                    range_sta=vehicle_stabale_out).find(output_type='list')
     for i in range(len(re_cl)):
         x = re_cl[i]
         # display(Polygon(x))
