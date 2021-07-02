@@ -10,6 +10,8 @@ dist/*
 .DS_Store
 .idea
 map_files/*
+chenchencode/RNN/Saved_model/*
+forecasting_sample/*
 *.jpg
 !/images/*.jpg
 !/docs/_images/*.jpg

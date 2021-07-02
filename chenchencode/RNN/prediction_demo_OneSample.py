@@ -20,6 +20,7 @@ from chenchencode.arg_customized import data_loader_customized
 import os
 import random
 import netron
+import tim
 
 import sys
 
@@ -165,13 +166,14 @@ class Seq2Seq(nn.Module):
 
     def forward(self, x1, x2, y, y_st):
         encoder_out = self.encoder(x1, x2)  # list([[],[],..])
-        init_hn = torch.zeros(self.batch_size, 1, self.decoder.lstm_ch_hidden)
-        decoder_rec = torch.empty(self.batch_size, 30, 2)
-        for j in range(self.batch_size):
+        batch_num = len(x1)
+        init_hn = torch.zeros(batch_num, 1, self.decoder.lstm_ch_hidden)
+        decoder_rec = torch.empty(batch_num, 30, 2)
+        for j in range(batch_num):
             out_encoder = encoder_out[j].unsqueeze(0)
             decoder_hi = self.attention(out_encoder, init_hn[j].unsqueeze(0))
-            decoder_input = y_st
-            decoder_ci = torch.zeros(self.batch_size, 1, self.decoder.lstm_ch_hidden)
+            decoder_input = y_st[j].unsqueeze(0)
+            decoder_ci = torch.zeros(1, 1, self.decoder.lstm_ch_hidden)
             for i in range(30):
                 decoder_out, (decoder_hi, decoder_ci) = self.decoder(decoder_input, (decoder_hi, decoder_ci))
                 decoder_hi = self.attention(out_encoder, decoder_hi)
@@ -179,7 +181,7 @@ class Seq2Seq(nn.Module):
                     decoder_input = decoder_out
                 else:
                     decoder_input = y[j, i, :].reshape(1, 1, 2)
-                decoder_rec[j][i] = decoder_out[j]
+                decoder_rec[j][i] = decoder_out[0]
 
         return decoder_rec
 
@@ -208,7 +210,7 @@ def loss_cal(pred, y, version=0):
         loss_dis = loss_dis.sum()
         loss_med = torch.pow(pred - y, 2)
         loss_med = loss_med.sum(-1)
-        loss_med = torch.sqrt(loss_med).sum() / 30 / 2
+        loss_med = torch.sqrt(loss_med).sum() / 30 / 2  # TODO： 治理用的均值，但是上边用的和，上边是否需要取均值？
         loss = loss_dis + loss_med
     elif loss_version == 4:  # sqrt(MSE)+邻接点间距，鼓励离散
         loss_dis = torch.abs(pred.diff(dim=1) - y.diff(dim=1))
@@ -221,7 +223,7 @@ def loss_cal(pred, y, version=0):
 if __name__ == '__main__':
     learning_rate = 0.0001
 
-    batch_size = 1
+    batch_size = 8
 
     file_list = get_file_path_list(r'e:\argoverse-api-ccuse\forecasting_sample\data')
     data = Data_read(file_list)
@@ -255,10 +257,19 @@ if __name__ == '__main__':
                                                                                       loss_all / (e + 1),
                                                                                       optimizer.param_groups[0]['lr']))
             # del loss
+            if loss_all < 0.3:
+                teacher_forcing_ratio = 0.1
             if loss < 0.001:
                 stop_label = 1
 
     # torch.onnx.export(net, (x1, x2, y, y_st), 'viz.pt', opset_version=11)
     # netron.start('viz.pt')
 
-    torch.save(net, 'Saved_model/one_sample_3861/net_v1_i670.pkl')
+    torch.save(net, 'Saved_model/20210702_68sample/i11861/net.pkl')
+    torch.save(net.state_dict(), 'Saved_model/20210702_68sample/i11861/netstate_dic.pkl')
+    all_state = {'net': net.state_dict(),
+                 'optimizer': optimizer.state_dict(),
+                 'loss': loss,
+                 'scheduler': scheduler.state_dict()
+                 }
+    torch.save(all_state, 'Saved_model/20210702_68sample/i11861/all_state.pkl')

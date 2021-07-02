@@ -423,7 +423,7 @@ if __name__ == '__main__':
 
     # object establishment
     pd.set_option('max_rows', 300)
-    file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\3828.csv'
+    file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\48.csv'
     fdlc = data_loader_customized(file_path)
 
     x0_out, y0_out, angle_out, city_out, vehicle_stabale_out = fdlc.get_main_dirction(agent_first=True)
@@ -435,7 +435,8 @@ if __name__ == '__main__':
         # display(Polygon(x))
         re_cl_df = DataFrame(x)
         plt.plot(re_cl_df[0], re_cl_df[1], linestyle='-.', c='lightcoral', linewidth=0.4)
-        plt.scatter(re_cl_df[0].iloc[0] + 1, re_cl_df[1].iloc[0] + 1, marker='o', s=20, c='forestgreen')
+        plt.scatter(re_cl_df[0].iloc[0] + 0.5, re_cl_df[1].iloc[0] + 0.5, marker='o', s=20, c='forestgreen')
+        plt.scatter(re_cl_df[0].iloc[1] + 0.5, re_cl_df[1].iloc[1] + 0.5, marker='.', s=20, c='darkgreen')
         plt.scatter(re_cl_df[0].iloc[-1], re_cl_df[1].iloc[-1], marker='x', s=20, c='darkorange')
     plt.plot(range_box_out[0], range_box_out[1], c='crimson', linestyle='--')
 
