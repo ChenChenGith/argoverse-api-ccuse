@@ -20,7 +20,7 @@ from chenchencode.arg_customized import data_loader_customized
 import os
 import random
 import netron
-import tim
+import time
 
 import sys
 
@@ -186,6 +186,37 @@ class Seq2Seq(nn.Module):
         return decoder_rec
 
 
+def logger(net, optimizer, loss, scheduler, save_path):
+    torch.save(net, save_path + 'net.pkl')
+    torch.save(net.state_dict(), save_path + 'netstate_dic.pkl')
+    all_state = {'net': net.state_dict(),
+                 'optimizer': optimizer.state_dict(),
+                 'loss': loss,
+                 'scheduler': scheduler.state_dict()
+                 }
+    torch.save(all_state, save_path + 'all_state.pkl')
+
+
+def absolute_error(pred, y, norm_range=100):
+    pred, y = pred * norm_range, y * norm_range
+    error_all = (pred - y).pow(2).sum(-1).sqrt()
+    # each sample
+    each_error_mean = error_all.mean(1)
+    each_error_at_1sec = [x[9] for x in error_all]
+    each_error_at_2sec = [x[19] for x in error_all]
+    each_error_at_3sec = [x[29] for x in error_all]
+    # all test sample
+    error_mean = error_all.mean()
+    error_at_1sec = error_all.mean(0)[9]
+    error_at_2sec = error_all.mean(0)[19]
+    error_at_3sec = error_all.mean(0)[29]
+
+    print('For each sample: \n ->mean_DE=%s m \n -> DE@1=%s m \n -> DE@2=%s m \n -> DE@3=%s m' % (
+    each_error_mean, each_error_at_1sec, each_error_at_2sec, each_error_at_3sec))
+    print('For all sample: \n ->mean_DE=%s m \n -> DE@1=%s m \n -> DE@2=%s m \n -> DE@3=%s m' % (
+    error_mean, error_at_1sec, error_at_2sec, error_at_3sec))
+
+
 def get_file_path_list(dir_path):
     result = []
     for maindir, subdir, file_name_list in os.walk(dir_path):
@@ -221,6 +252,10 @@ def loss_cal(pred, y, version=0):
 
 
 if __name__ == '__main__':
+
+    net_ = torch.load(r'Saved_model/20210702_68sample/i11861/net.pkl')
+
+    laod_exit_net = True
     learning_rate = 0.0001
 
     batch_size = 8
@@ -265,11 +300,5 @@ if __name__ == '__main__':
     # torch.onnx.export(net, (x1, x2, y, y_st), 'viz.pt', opset_version=11)
     # netron.start('viz.pt')
 
-    torch.save(net, 'Saved_model/20210702_68sample/i11861/net.pkl')
-    torch.save(net.state_dict(), 'Saved_model/20210702_68sample/i11861/netstate_dic.pkl')
-    all_state = {'net': net.state_dict(),
-                 'optimizer': optimizer.state_dict(),
-                 'loss': loss,
-                 'scheduler': scheduler.state_dict()
-                 }
-    torch.save(all_state, 'Saved_model/20210702_68sample/i11861/all_state.pkl')
+    save_path = 'Saved_model/20210702_68sample/i10001'
+    logger(net, optimizer, loss, scheduler, save_path)

@@ -11,6 +11,7 @@ import torch
 import os
 
 py_path = os.path.dirname(os.path.abspath(__file__))
+print(py_path)
 
 
 class find_centerline_veh_coor(object):
