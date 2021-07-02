@@ -11,7 +11,7 @@ dist/*
 .idea
 map_files/*
 chenchencode/RNN/Saved_model/*
-forecasting_sample/*
+forecasting_sample/
 *.jpg
 !/images/*.jpg
 !/docs/_images/*.jpg
