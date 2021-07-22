@@ -12,6 +12,7 @@ dist/*
 map_files/*
 chenchencode/RNN/Saved_model/*
 forecasting_sample/*
+chenchencode/Saved_resultes/*
 *.pt
 *.csv
 *.rar

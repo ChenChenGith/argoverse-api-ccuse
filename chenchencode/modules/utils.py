@@ -5,12 +5,13 @@
 import os
 import torch
 import time
+import pandas as pd
 
 
 class Recorder(object):
-    def __init__(self, path):
+    def __init__(self, path=r'../Saved_resultes/'):
         self.date = time.strftime('%Y%m%d', time.localtime())
-        self.save_dir = path + '_' + self.date
+        self.save_dir = path + self.date
         self.check_dir()
         pass
 
@@ -28,6 +29,13 @@ class Recorder(object):
         torch.save(state, os.path.join(self.save_dir, save_file))
         pass
 
+    def save_test(self):
+        x = pd.DataFrame()
+        save_file = r'x.csv'
+        x.to_csv(os.path.join(self.save_dir, save_file))
 
 if __name__ == '__main__':
-    print(os.path.join('rs', 'd'))
+    r = Recorder()
+    print(r.save_dir)
+    r.save_test()
+
