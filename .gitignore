@@ -23,7 +23,7 @@ city_archive.json
 .mypy_cache
 .coverage
 htmlcov
-/*saved*/
+*saved*/
 
 utils/__pycache__/*
 prediction/__pycache__/*
