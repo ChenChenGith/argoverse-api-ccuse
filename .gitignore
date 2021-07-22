@@ -12,6 +12,9 @@ dist/*
 map_files/*
 chenchencode/RNN/Saved_model/*
 forecasting_sample/*
+*.pt
+*.csv
+*.rar
 *.jpg
 !/images/*.jpg
 !/docs/_images/*.jpg
@@ -20,6 +23,7 @@ city_archive.json
 .mypy_cache
 .coverage
 htmlcov
+/*saved*/
 
 utils/__pycache__/*
 prediction/__pycache__/*
@@ -39,3 +43,7 @@ tests/test_data/tmp
 /sphinx/source
 /docs/.buildinfo
 /docs/_sources
+
+Thumbs.db
+ehthumbs.db
+Desktop.ini
