@@ -325,6 +325,28 @@ class data_loader_customized(object):
         '''
         return (raw_data * self.norm_range) + torch.tensor([self.x0, self.y0])
 
+    def get_absolute_error(self, pred, y):
+        pred, y = pred * self.norm_range, y * self.norm_range
+        error_all = (pred - y).pow(2).sum(-1).sqrt()
+        # each sample
+        each_error_mean = error_all.mean(1)
+        each_error_at_1sec = [x[9] for x in error_all]
+        each_error_at_2sec = [x[19] for x in error_all]
+        each_error_at_3sec = [x[29] for x in error_all]
+        # all test sample
+        error_mean = error_all.mean()
+        error_at_1sec = error_all.mean(0)[9]
+        error_at_2sec = error_all.mean(0)[19]
+        error_at_3sec = error_all.mean(0)[29]
+
+        print('For each sample: \n ->mean_DE=%s m \n -> DE@1=%s m \n -> DE@2=%s m \n -> DE@3=%s m' % (
+            each_error_mean, each_error_at_1sec, each_error_at_2sec, each_error_at_3sec))
+        print('For all sample: \n ->mean_DE=%s m \n -> DE@1=%s m \n -> DE@2=%s m \n -> DE@3=%s m' % (
+            error_mean, error_at_1sec, error_at_2sec, error_at_3sec))
+
+        return ([each_error_mean, each_error_at_1sec, each_error_at_2sec, each_error_at_3sec],
+                [error_mean, error_at_1sec, error_at_2sec, error_at_3sec])
+
     def get_main_dirction(self, use_point=10, agent_first=True):
         """
         using the first point ant the use_point'th point coordinates to calculate the angle
@@ -361,7 +383,7 @@ class torch_treat(object):
         '''
         used for the adjustment of label data, when label data have nan
         Args:
-            pred_data: tensor(n,2), predicted trajectory coordinates from your algorithm
+            pred_data: tensor(n,2), predicted trajectory coordinates from your modules
             label: tensor(m,2), label trajectory coordinates that may contains NaN
         Returns:
             treated_label: tensor(m,2), label trajectory without NaN
@@ -424,7 +446,7 @@ if __name__ == '__main__':
 
     # object establishment
     pd.set_option('max_rows', 300)
-    file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\48.csv'
+    file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\3828.csv'
     fdlc = data_loader_customized(file_path)
 
     x0_out, y0_out, angle_out, city_out, vehicle_stabale_out = fdlc.get_main_dirction(agent_first=True)
