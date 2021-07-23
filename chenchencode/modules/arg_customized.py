@@ -1,6 +1,5 @@
 from argoverse.map_representation.map_api import ArgoverseMap
 from shapely.geometry import Polygon, LineString, MultiPoint, Point
-from argoverse.utils.se2 import SE2
 import numpy as np
 import copy
 from pandas import DataFrame, Series
@@ -38,6 +37,8 @@ class find_centerline_veh_coor(object):
             self.range_front, self.range_back, self.range_side = 20, 20, 20
         self.city = city
         self.save_path = save_path
+        self.rotation_matrix = np.array([[np.cos(self.theta), -np.sin(self.theta)],
+                                         [np.sin(self.theta), np.cos(self.theta)]])
 
         self.rebuild_centerline()
         self.rotation_target_box()
@@ -48,11 +49,8 @@ class find_centerline_veh_coor(object):
         x2, y2 = self.range_front, -self.range_side
         x3, y3 = -self.range_back, self.range_side
         x4, y4 = -self.range_back, -self.range_side
-        rotation_matrix = self.rotation_mat()
-        dss = SE2(rotation=rotation_matrix, translation=np.array([0, 0]))
         transformed_pts = np.array([[x1, y1], [x2, y2], [x4, y4], [x3, y3]])
-        pts = dss.transform_point_cloud(transformed_pts)
-        tmpp = DataFrame(pts)
+        tmpp = DataFrame(transformed_pts.dot(self.rotation_matrix.T))
         tmpp[0] = tmpp[0] + self.x0
         tmpp[1] = tmpp[1] + self.y0
         polygon = Polygon(np.array(tmpp))
@@ -61,13 +59,6 @@ class find_centerline_veh_coor(object):
         self.range_box = tmpp
 
         return self.range_box
-
-    def rotation_mat(self):
-        '''calculate the rotation matrix'''
-        cos_theta = np.cos(self.theta)
-        sin_theta = np.sin(self.theta)
-        r_mat = np.array([[cos_theta, -sin_theta], [sin_theta, cos_theta]])
-        return r_mat
 
     def rebuild_centerline(self):
         '''rebuild centerline and save data'''
@@ -167,7 +158,8 @@ class data_loader_customized(object):
                                range_const=False,
                                range_dis_list='default',
                                return_type='df',
-                               include_centerline=False) -> (pd.DataFrame, pd.DataFrame):
+                               include_centerline=False,
+                               rotation_to_standard=False) -> (pd.DataFrame, pd.DataFrame):
         """
         Get the first (know_num, 2) coordinates of all track_ID in the current sequence for the use of trajectory prediction
         Data of the target track are placed at the first
@@ -203,6 +195,8 @@ class data_loader_customized(object):
                                'list[tensor]'], 'return type should be df, array, tensor or list[tensor]'
         obj_type = 'AGENT' if agent_first else 'AV'
 
+        self.x0, self.y0, self.angle, self.city, vehicle_stabale = self.get_main_dirction(agent_first=agent_first)
+
         seq_df = copy.deepcopy(self.seq_df[:])  # copy seq_df
         seq_df['TIMESTAMP'] -= seq_df['TIMESTAMP'][0]  # time normalization
         seq_df['TIMESTAMP'] = seq_df['TIMESTAMP'].round(1)
@@ -210,18 +204,20 @@ class data_loader_customized(object):
         seq_df.drop(seq_df[seq_df['TIMESTAMP'] > self.max_time].index, inplace=True)
 
         if include_centerline:  # add centerline information
-            x0, y0, angle, city, vehicle_stabale = self.get_main_dirction(agent_first=agent_first)
-            re_cl, range_box = find_centerline_veh_coor(x0, y0, angle, city, range_dis_list=range_dis_list,
-                                                        range_sta=vehicle_stabale).find(output_type='df')
+            re_cl, range_box = find_centerline_veh_coor(self.x0, self.y0, self.angle, self.city,
+                                                        range_dis_list=range_dis_list, range_sta=vehicle_stabale).find(
+                output_type='df')
             re_cl = re_cl[['TIMESTAMP', 'TRACK_ID', 'X', 'Y']]
+        else:
+            re_cl = DataFrame(columns=['TIMESTAMP', 'TRACK_ID', 'X', 'Y'])
 
         if range_const == True:
             seq_df['index'] = seq_df.index  # reserve index for the merge after shapely operation
             try:
                 range_box_np = range_box.to_numpy()
             except:
-                x0, y0, angle, city, vehicle_stabale = self.get_main_dirction(agent_first=agent_first)
-                range_box = find_centerline_veh_coor(x0, y0, angle, city, range_dis_list=range_dis_list,
+                range_box = find_centerline_veh_coor(self.x0, self.y0, self.angle, self.city,
+                                                     range_dis_list=range_dis_list,
                                                      range_sta=vehicle_stabale).range_box
                 range_box_np = range_box.to_numpy()
             tmp_inrange = np.array(
@@ -249,37 +245,24 @@ class data_loader_customized(object):
         label_data = label_data.drop_duplicates('TIMESTAMP')
         label_data = label_data[['X', 'Y']]
 
-        self.raw_label_data = label_data  # 保存原始真值
-
-        self.x0, self.y0 = target_data['X'].iloc[0], target_data['Y'].iloc[0]
+        # self.raw_label_data = label_data  # 保存原始真值
 
         if normalization:  # normalizing the raw coordinates
-            know_data = self.standardization(know_data)
-            label_data = self.standardization(label_data)
-            if include_centerline: re_cl = self.standardization(re_cl)
+            know_data = self.make_normalization(know_data)
+            label_data = self.make_normalization(label_data)
+            re_cl = self.make_normalization(re_cl)
 
-            # know_data['X'] -= self.x0
-            # know_data['Y'] -= self.y0
-            # know_data['TIMESTAMP'] -= know_num / 10 / 2
-            # label_data['X'] -= self.x0
-            # label_data['Y'] -= self.y0
-            # if include_centerline:
-            #     re_cl['X'] -= self.x0
-            #     re_cl['Y'] -= self.y0
-            #
-            # know_data['TIMESTAMP'] = know_data['TIMESTAMP'] / norm_range_time
-            # know_data[['TRACK_ID', 'X', 'Y']] = know_data[['TRACK_ID', 'X', 'Y']] / norm_range
-            # # label_data['TIMESTAMP'] = label_data['TIMESTAMP'] / norm_range_time
-            # label_data[['X', 'Y']] = label_data[['X', 'Y']] / norm_range
-            # if include_centerline:
-            #     re_cl[['X', 'Y']] = re_cl[['X', 'Y']] / norm_range
+        if rotation_to_standard:
+            know_data = self.rotation_to_standard(know_data, after_norm=normalization)
+            label_data = self.rotation_to_standard(label_data, after_norm=normalization)
+            re_cl = self.rotation_to_standard(re_cl, after_norm=normalization)
 
         if return_type == 'array':
-            if include_centerline: know_data = pd.concat((know_data, re_cl))
+            know_data = pd.concat((know_data, re_cl))
             know_data = np.array(know_data)
             label_data = np.array(label_data)
         elif return_type == 'tensor':
-            if include_centerline: know_data = pd.concat((know_data, re_cl))
+            know_data = pd.concat((know_data, re_cl))
             know_data = torch.from_numpy(know_data.values).float()
             label_data = torch.from_numpy(label_data.values).float()
         elif return_type == 'list[tensor]':
@@ -291,24 +274,21 @@ class data_loader_customized(object):
 
             label_data = torch.from_numpy(label_data.values).float()
 
-            if include_centerline:
-                ite = re_cl['TRACK_ID'].unique()
-                center_data_out = []
-                for i in ite:
-                    center_data_out.append(
-                        torch.from_numpy(re_cl[re_cl['TRACK_ID'] == i][['TIMESTAMP', 'X', 'Y']].values).float())
+            ite = re_cl['TRACK_ID'].unique()
+            center_data_out = []
+            for i in ite:
+                center_data_out.append(
+                    torch.from_numpy(re_cl[re_cl['TRACK_ID'] == i][['TIMESTAMP', 'X', 'Y']].values).float())
 
-                return (know_data_out, center_data_out, label_data)
-            return (know_data_out, label_data)
+            return (know_data_out, center_data_out, label_data)
 
-        return (know_data, label_data)
+        return (know_data, re_cl, label_data)
 
-    def standardization(self, raw_data: DataFrame):
+    def make_normalization(self, raw_data: DataFrame):
         '''
         Used to standard the data
         '''
-        raw_data['X'] -= self.x0
-        raw_data['Y'] -= self.y0
+        raw_data[['X', 'Y']] -= [self.x0, self.y0]
         if 'TRACK_ID' in raw_data.columns:
             raw_data[['TRACK_ID', 'X', 'Y']] = raw_data[['TRACK_ID', 'X', 'Y']] / self.norm_range
         else:
@@ -319,11 +299,27 @@ class data_loader_customized(object):
 
         return raw_data
 
-    def de_standardization(self, raw_data: torch.tensor):
+    def de_standardization(self, raw_data: DataFrame):
         '''
         Used to de-standard the predicted coordinates
         '''
-        return (raw_data * self.norm_range) + torch.tensor([self.x0, self.y0])
+        if isinstance(raw_data, torch.tensor):
+            return (raw_data * self.norm_range) + torch.tensor([self.x0, self.y0])
+        elif isinstance(raw_data, DataFrame):
+            return raw_data[['X', 'Y']] * self.norm_range + [self.x0, self.y0]
+
+    def rotation_to_standard(self, raw_data: DataFrame, after_norm: bool):
+        theta = np.pi / 2 - self.angle
+        rotation_matrix = np.array([[np.cos(theta), -np.sin(theta)],
+                                    [np.sin(theta), np.cos(theta)]])
+        if after_norm:
+            raw_data[['X', 'Y']] = raw_data[['X', 'Y']].dot(rotation_matrix.T)
+        else:
+            raw_data[['X', 'Y']] -= [self.x0, self.y0]
+            raw_data[['X', 'Y']] = raw_data[['X', 'Y']].dot(rotation_matrix.T)
+            raw_data[['X', 'Y']] += [self.x0, self.y0]
+
+        return raw_data
 
     def get_absolute_error(self, pred, y):
         pred, y = pred * self.norm_range, y * self.norm_range
@@ -392,7 +388,7 @@ class torch_treat(object):
         return treated_label
 
 
-if __name__ == '__main__':
+def ceshi_1():
     import matplotlib.pyplot as plt
 
     # =>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>=>
@@ -450,7 +446,7 @@ if __name__ == '__main__':
     fdlc = data_loader_customized(file_path)
 
     x0_out, y0_out, angle_out, city_out, vehicle_stabale_out = fdlc.get_main_dirction(agent_first=True)
-    print(vehicle_stabale_out)
+    print(angle_out)
     re_cl, range_box_out = find_centerline_veh_coor(x0_out, y0_out, angle_out, city_out,
                                                     range_sta=vehicle_stabale_out).find(output_type='list')
     for i in range(len(re_cl)):
@@ -463,7 +459,7 @@ if __name__ == '__main__':
         plt.scatter(re_cl_df[0].iloc[-1], re_cl_df[1].iloc[-1], marker='x', s=20, c='darkorange')
     plt.plot(range_box_out[0], range_box_out[1], c='crimson', linestyle='--')
 
-    kd, pda = fdlc.get_all_traj_for_train(agent_first=True, normalization=False, range_const=True,
+    kd, s, pda = fdlc.get_all_traj_for_train(agent_first=True, normalization=False, range_const=True,
                                           include_centerline=False)
     g = kd.groupby('TRACK_ID')
     for name, data in g:
@@ -477,3 +473,42 @@ if __name__ == '__main__':
     plt.plot(pda['X'], pda['Y'], c='blue')
     plt.axis('equal')
     plt.show()
+
+
+def ceshi_2():
+    # 测试直接从loader中输出车道信息
+    import matplotlib.pyplot as plt
+    pd.set_option('max_rows', 300)
+    file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\3828.csv'
+    fdlc = data_loader_customized(file_path)
+
+    kd, re_cl, pda = fdlc.get_all_traj_for_train(agent_first=True, normalization=True, range_const=True,
+                                          include_centerline=True)
+    off_dis = 0.01
+    g = kd.groupby('TRACK_ID')
+    for name, data in g:
+        c = 'black' if name != 0 else 'red'
+        plt.plot(data['X'], data['Y'], c=c, linewidth=0.8)
+        plt.scatter(data['X'].iloc[0], data['Y'].iloc[0], marker='o', s=10, c=c)
+        # if name==0:
+        #     plt.scatter(data['X'], data['Y'], c=c, linewidth=0.8)
+    pda = pda.fillna(method='ffill')
+    pda = pda.fillna(method='backfill')
+    plt.plot(pda['X'], pda['Y'], c='blue')
+
+    g = re_cl.groupby('TRACK_ID')
+    for name, data in g:
+        data.columns=['t', 'id', 0, 1]
+        # display(Polygon(x))
+        re_cl_df = data
+        plt.plot(re_cl_df[0], re_cl_df[1], linestyle='-.', c='lightcoral', linewidth=0.4)
+        plt.scatter(re_cl_df[0].iloc[0] + off_dis, re_cl_df[1].iloc[0] + off_dis, marker='o', s=20, c='forestgreen')
+        plt.scatter(re_cl_df[0].iloc[1] + off_dis, re_cl_df[1].iloc[1] + off_dis, marker='.', s=20, c='darkgreen')
+        plt.scatter(re_cl_df[0].iloc[-1], re_cl_df[1].iloc[-1], marker='x', s=20, c='darkorange')
+    # plt.plot(range_box_out[0], range_box_out[1], c='crimson', linestyle='--')
+
+    plt.axis('equal')
+    plt.show()
+
+if __name__ == '__main__':
+    ceshi_2()
