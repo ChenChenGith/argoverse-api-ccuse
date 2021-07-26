@@ -58,61 +58,82 @@ surr_centerline, range_box = find.find(output_type='list') -> np.array(n,m,3), n
 
 ### 2. Data loader customized
 
-#### 2.1 Get other vehicle data from forecasting data
-
-*A new module in '../chenchencode/arg_customized'* ([Codes](chenchencode/arg_customized.py))
-
-> 20210423
-
-The original API only provides function for agent trajectory finding, but not other vehicles.
-
-Codes can be found [Here](chenchencode/arg_customized.py)
+> creat  20210423   
+> update 20210726  
 
 **Use:**
 
 ``` python
-from chenchencode.arg_customized import data_loader_customized
+from chenchencode.modules.arg_customized import data_loader_customized
+fdlc = data_loader_customized(dir_data_path,
+                              know_num=20,
+                              agent_first=True,
+                              normalization=False,
+                              norm_range_time=5,
+                              norm_range=100,
+                              range_const=False,
+                              range_dis_list='default',
+                              return_type='df',
+                              include_centerline=False,
+                              rotation_to_standard=False,
+                              save_preprocessed_data=False)
 
-fdlc = data_loader_customized(root_dir)
-fdlc[i].get_ov_traj(track_id)  # i: squence (*.csv file) int ID    -> np.array(n,2)
+# Args:
+#    dir_data_path: str, dir path that contains the data files (.csv), example:'../forecasting_sample/data'
+#    know_num: int (default=20), traj data that are known for the prediction
+#    agent_first: bool (default=True), chose agent as the prediction target, else AV
+#    normalization: bool (default=False), if true, the raw coordinates will be normalized to nearly [0,1] using the norm_range
+#    norm_range_time: float (default=5), used for the normalization on TIMESTAMP
+#    norm_range: float (default=100), used for the normalization on [TRACKID,X,Y]. points whose distance between the first point of agent/AV is equal to norm_range, then it will map to 1
+#    range_const: bool (default=False), if true, only the coordinates in the range_dis_list are extracted, and range_dis_list is needed
+#    range_dis_list: list (default='default', means [range_front, range_back, range_side]=[80, 20, 30], as in 'find_centerline_veh_coor'), the range used in finding surrounding centerline
+#    return_type: str, to chose the outputs' format, should be one of [dataframe, array, tensor, list[tensor]]
+#    include_centerline: bool (default=False), if true, the center line will be found.
+#    rotation_to_standard: bool (default=False), if true, all the data (traj and centerline) will be rotated to make the ego vehicle drive from south to north
+#    save_preprocessed_data: bool (default=False), if true, the pre-processed data will be saved to '../forecasting_sample/preprocess_data' folder
+```
+
+#### 2.1 Get other vehicle data from forecasting data
+
+*A new module in 'chenchencode/modules/arg_customized.py'* ([Codes](chenchencode/modules/arg_customized.py))
+
+> creat  20210423 
+
+The original API only provides function for agent trajectory finding, but not other vehicles.
+
+**Use:**
+
+``` python
+c.get_ov_traj(file_name, track_id)
+
+# Args:
+#   file_name: *.csv file name
+#   track_id: other vehicle's id
+# Returns:
+#   numpy array of shape (seq_len x 2) for the vehicle trajectory
 ```
 
 #### 2.2 Get training data from a sequence (a *.csv file)
 
-> 20210425
+> creat 20210425  
+> update 20210726
 
 A function that can extract data for a training algorithm.
 
 **Use:**
 
 ``` python
-from chenchencode.arg_customized import data_loader_customized
-# Args:
-#     know_num: int, traj data that are known for the prediction
-#     agent_first: bool, chose agent as the prediction target, else AV
-#     relative: if true, the coordinates in both train and label data will be mapped to relative values with the start point of agent/AV
-#     normalization: if true, the raw coordinates will be normalized to nearly [0,1] using the norm_range
-#                    note: when normalization=True, relative will be assign to be True.
-#     norm_range: used for the normalization. points whose distance between the first point of agent/AV is equal to norm_range, then it will map to 1  
-#     range_const: if true, only the coordinates in the range_box are extracted
-#     range_box: the four point of the range, can get from function (find_centerline_veh_coor)
-#     return_type: to chose the outputs' format, [dataframe, array, tensor]
-#     include_centerline: if true, the center line will be found and cat with trajectory data.
-#                         note: when include_centerline=True, return_type will be assign to be tensor.              
-# Returns:
-#     train_data: pd.DataFrame(columns = [['TIMESTAMP',] 'TRACK_ID', 'X', 'Y']), n*2
-#     label_data: pd.DataFrame(columns = [['TIMESTAMP',] 'X', 'Y']), (50-know_num)*2 ,order is in scending time
+(train_data, centerline_data, label_data) = fdlc.get_all_traj_for_train(r'4791.csv')
 
-fdlc = data_loader_customized(file_path)
-train_data, label_data = fdlc.get_all_traj_for_train(know_num=20, 
-                                                     agent_first=True,
-                                                     relative=False, 
-                                                     normalization=False, 
-                                                     norm_range=100
-                                                     range_const=False,
-                                                     range_box=None,
-                                                     return_type='df',
-                                                     include_centerline=False)
+# Get the first (know_num, 2) coordinates of all track_ID in the current sequence for the use of trajectory prediction
+# Data of the target track are placed at the first
+# Args:
+#    file_name: .csv file name
+# Returns:
+#    train_data: pd.DataFrame(columns = ['TIMESTAMP', 'TRACK_ID', 'X', 'Y']), n*2
+#    centerline_data: pd.DataFrame(columns = ['TRACK_ID', 'X', 'Y']),
+#    label_data: pd.DataFrame(columns = ['TIMESTAMP', 'X', 'Y']), (50-know_num)*2 ,order is in scending time
+#    all of the output are interpolated
 ```
 
 #### 2.3 Get the trajectory direction (for the surrounding centerline finding)
@@ -125,7 +146,8 @@ trajectory.
 **Use:**
 
 ``` python
-from chenchencode.arg_customized import data_loader_customized
+x0, y0, angle, city, vehicle_stabale = self.get_main_dirction(use_point=10)
+
 # Args:
 #     use_point: the i-th point that used for the angle calculation
 #     agent_first: if true, data of agent vehicle will be used: should be the same as that in get_all_traj_for_train
@@ -134,8 +156,6 @@ from chenchencode.arg_customized import data_loader_customized
 #     angle: the over all angle, for the surrounding centerline extraction
 #     city: city name
 #     square_range: When vehicle is amost stationary, it's True, so suggest range_sta=True in finding surrounding centerline
-fdlc = data_loader_customized(file_path)
-x0, y0, angle, city, range_advice = get_main_dirction(self, use_point=10, agent_first=True) ->angle (rad in [-pi, pi])
 ```
 
 #### 2.4 Making the most of data when a *.csv file contains more than 5 seconds data (TODO...)

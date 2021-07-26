@@ -9,23 +9,23 @@ import pandas as pd
 
 
 class Recorder(object):
-    def __init__(self, path=r'../Saved_resultes/'):
+    def __init__(self, method_version, path=r'../Saved_resultes/'):
         self.date = time.strftime('%Y%m%d', time.localtime())
-        self.save_dir = path + self.date
+        self.save_dir = path + self.date + '_' + method_version
         self.check_dir()
-        pass
 
     def check_dir(self):
         if not os.path.exists(self.save_dir):
             os.makedirs(self.save_dir)
 
-    def recode_state(self, ite_num, net_parameter, optimizer_parameter, loss, loss_scheduler_parameter):
+    def recode_state(self, ite_num, net_parameter, optimizer_parameter, loss, loss_all, loss_scheduler_parameter):
         state = {'net': net_parameter,
                  'optimizer': optimizer_parameter,
                  'loss': loss,
+                 'loss_all': loss_all,
                  'scheduler': loss_scheduler_parameter
                  }
-        save_file = r'i_' + str(ite_num) + 'net_state.pkl'
+        save_file = r'i_' + str(ite_num) + '_full_net_state.pkl'
         torch.save(state, os.path.join(self.save_dir, save_file))
         pass
 
