@@ -322,6 +322,9 @@ class data_loader_customized(object):
         return raw_data
 
     def get_absolute_error(self, pred, y):
+        '''
+        get absolute error, unit:m
+        '''
         pred, y = pred * self.norm_range, y * self.norm_range
         error_all = (pred - y).pow(2).sum(-1).sqrt()
         # each sample
@@ -369,6 +372,23 @@ class data_loader_customized(object):
             angle = np.arctan2(y1 - y0, x1 - x0)
 
         return (x0, y0, angle, city, vehicle_stabale)
+
+
+    def exist_detection(self):
+        '''
+        Detect if the raw data has been preprocessed.
+        If true, directly reading the saved post-processed file
+        '''
+        dir_processed_data = os.path.abspath(os.path.join(self.file_path, "../..")) + r'\preprocess_data'
+        if not os.path.exists(dir_processed_data):
+            os.makedirs(dir_processed_data)
+        _, file_name = os.path.split(self.file_path)
+        check_path = os.path.join(dir_processed_data, file_name)
+        if os.path.exists(check_path):
+            self.file_path = check_path
+            return True
+        else:
+            return False
 
 
 class torch_treat(object):
@@ -479,11 +499,11 @@ def ceshi_2():
     # 测试直接从loader中输出车道信息
     import matplotlib.pyplot as plt
     pd.set_option('max_rows', 300)
-    file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\3828.csv'
+    file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data\4791.csv'
     fdlc = data_loader_customized(file_path)
 
     kd, re_cl, pda = fdlc.get_all_traj_for_train(agent_first=True, normalization=True, range_const=True,
-                                          include_centerline=True)
+                                          include_centerline=True, rotation_to_standard=True)
     off_dis = 0.01
     g = kd.groupby('TRACK_ID')
     for name, data in g:
