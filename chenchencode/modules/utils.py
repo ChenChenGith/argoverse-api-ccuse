@@ -34,8 +34,18 @@ class Recorder(object):
         save_file = r'x.csv'
         x.to_csv(os.path.join(self.save_dir, save_file))
 
+def position_encoding(output_size, x, max_len=50):
+    pe = torch.zeros(max_len, output_size)
+    position = torch.arange(0, max_len).unsqueeze(1)
+    print(torch.arange(0, output_size, 2))
+    div_term = torch.exp(torch.arange(0, output_size, 2) *- (math.log(10000.0) / output_size))
+    pe[:,0::2] = torch.sin(position*div_term)
+    pe[:,1::2] = torch.cos(position*div_term)
+    pe = pe.unsqueeze(0)
+    return pe[:,:x.size(1)]
+
 if __name__ == '__main__':
-    r = Recorder()
+    r = Recorder(method_version='Method_test')
     print(r.save_dir)
     r.save_test()
 

@@ -62,8 +62,8 @@ class find_centerline_veh_coor(object):
 
     def rebuild_centerline(self):
         '''rebuild centerline and save data'''
-        save_path_shapely = self.save_path + '\\' + self.city + '_shapely'
-        save_path_array = self.save_path + '\\' + self.city + '_array'
+        save_path_shapely = self.save_path + '/' + self.city + '_shapely'
+        save_path_array = self.save_path + '/' + self.city + '_array'
         try:
             f = open(save_path_shapely, 'rb')
             line_set_shapely = pickle.load(f)
@@ -174,7 +174,7 @@ class data_loader_customized(object):
 
         self.save_tensor = True if return_type == 'list[tensor]' else False
 
-        self.dir_processed_data = os.path.abspath(os.path.join(dir_data_path, "..")) + r'\preprocess_data'
+        self.dir_processed_data = os.path.abspath(os.path.join(dir_data_path, "..")) + r'/preprocess_data'
         preprocess_info = str(know_num) + '_' + str(agent_first) + '_' + str(normalization) + '_' + \
                           str(norm_range_time) + '_' + str(norm_range) + '_' + str(range_const) + '_' + \
                           str(range_dis_list) + '_' + return_type + '_' + str(include_centerline) + '_' + \
@@ -547,10 +547,10 @@ def ceshi_2():
     pd.set_option('max_rows', 300)
     file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data'
     fdlc = data_loader_customized(file_path, agent_first=True, normalization=True, range_const=True,
-                                  include_centerline=True, rotation_to_standard=True, save_preprocessed_data=True,
-                                  return_type='list[tensor]')
+                                  include_centerline=True, rotation_to_standard=True, save_preprocessed_data=False,
+                                  return_type='df')
 
-    kd, re_cl, pda = fdlc.get_all_traj_for_train(r'4791.csv')
+    kd, re_cl, pda = fdlc.get_all_traj_for_train(r'11.csv')
     off_dis = 0.01
     g = kd.groupby('TRACK_ID')
     for name, data in g:
