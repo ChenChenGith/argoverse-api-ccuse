@@ -7,8 +7,7 @@
 
 # 20210604 修改： 发现使用mseloss会导致所有的点都学习到均值：因为这样确实是loss最小的情况，但不是想要的结果，所以考虑引入方差
 # 20210608 进展：可以成功对单个样本进行预测，精度可以到10-20cm以内
-
-
+import numpy as np
 import torch
 import torch.utils.data as data_
 from torch.utils.data import DataLoader
@@ -182,27 +181,12 @@ class Seq2Seq(nn.Module):
                     decoder_input = y[j, i, :].reshape(1, 1, 2)
                 decoder_rec[j][i] = decoder_out[0]
 
+        self.learning_rate = teacher_forcing_ratio
+
         return decoder_rec
 
-
-def absolute_error(pred, y, norm_range=100):
-    pred, y = pred * norm_range, y * norm_range
-    error_all = (pred - y).pow(2).sum(-1).sqrt()
-    # each sample
-    each_error_mean = error_all.mean(1)
-    each_error_at_1sec = [x[9] for x in error_all]
-    each_error_at_2sec = [x[19] for x in error_all]
-    each_error_at_3sec = [x[29] for x in error_all]
-    # all test sample
-    error_mean = error_all.mean()
-    error_at_1sec = error_all.mean(0)[9]
-    error_at_2sec = error_all.mean(0)[19]
-    error_at_3sec = error_all.mean(0)[29]
-
-    print('For each sample: \n ->mean_DE=%s m \n -> DE@1=%s m \n -> DE@2=%s m \n -> DE@3=%s m' % (
-        each_error_mean, each_error_at_1sec, each_error_at_2sec, each_error_at_3sec))
-    print('For all sample: \n ->mean_DE=%s m \n -> DE@1=%s m \n -> DE@2=%s m \n -> DE@3=%s m' % (
-        error_mean, error_at_1sec, error_at_2sec, error_at_3sec))
+    def check_learning_rate(self):
+        return self.learning_rate
 
 
 def get_file_path_list(dir_path):
@@ -241,8 +225,9 @@ def loss_cal(pred, y, version=0):
 if __name__ == '__main__':
     laod_exit_net = False
     learning_rate = 0.0001
-    recode_freq = 5
+    recode_freq = 200
     method_version = 'version_1'
+    loss_version = 3
 
     raw_data_dir = r'e:\argoverse-api-ccuse\forecasting_sample\data'
     file_list = get_file_path_list(raw_data_dir)
@@ -252,9 +237,10 @@ if __name__ == '__main__':
                                               return_type='list[tensor]',
                                               include_centerline=True,
                                               rotation_to_standard=True,
-                                              save_preprocessed_data=True)
+                                              save_preprocessed_data=True,
+                                              fast_read_check=True)
 
-    batch_size = 8
+    batch_size = 1
     data = Data_read(file_list, argo_data_reader)
     data_loader = DataLoader(data, batch_size=batch_size, shuffle=True, collate_fn=co_fn)
 
@@ -272,7 +258,7 @@ if __name__ == '__main__':
     loss_all = 0
     stop_label = 0
     e = 1
-    loss_version = 3
+    ave_loss_rec = []
     while stop_label == 0:
         for batch_id, (x1, x2, y, y_st) in enumerate(data_loader):
             pred = net(x1, x2, y, y_st)
@@ -283,18 +269,25 @@ if __name__ == '__main__':
             scheduler.step(loss)
             e += 1
             loss_all += float(loss)
-            if e % 10 == 0:  # 每 100 次输出结果
-                print('Epoch: {}, Loss: {:.5f}, ave loss: {:.5f}, lr: {:.10f}'.format(e + 1, loss.item(),
-                                                                                      loss_all / (e + 1),
-                                                                                      optimizer.param_groups[0]['lr']))
+            ave_loss = loss_all / (e + 1)
+            if e % 100 == 0:  # 每 100 次输出结果，记录ave_loss曲线
+                print('Epoch: {}, Loss: {:.5f}, ave loss: {:.5f}, lr: {:.10f}, teaching rate: {:.3f}, (l+al)/2: {:.5f}'
+                      .format(e + 1, loss.item(), ave_loss, optimizer.param_groups[0]['lr'], net.check_learning_rate(),
+                              (ave_loss + float(loss)) / 2))
+                ave_loss_rec.append(ave_loss)
             if e % recode_freq == 0:
-                recorder.recode_state(e, net.state_dict(), optimizer.state_dict(), loss, loss_all, scheduler.state_dict())
+                recorder.recode_state(e, net.state_dict(), optimizer.state_dict(), loss, loss_all,
+                                      scheduler.state_dict())
+                abs_error = argo_data_reader.get_absolute_error(pred, y)
+                recorder.general_record(e, 'abs_error', {'error': abs_error['Average_error'], 'ave_loss': ave_loss_rec})
             # del loss
-            if loss_all < 0.3:
-                teacher_forcing_ratio = 0.1
+            teacher_forcing_ratio = np.clip(np.round((ave_loss + float(loss)) / 2, 1), 0.0, 0.9)
+            # if ave_loss < 0.3:
+            #     teacher_forcing_ratio = 0.1
+            # if ave_loss >= 0.3:
+            #     teacher_forcing_ratio = 0.5
             if loss < 0.001:
                 stop_label = 1
 
     # torch.onnx.export(net, (x1, x2, y, y_st), 'viz.pt', opset_version=11)
     # netron.start('viz.pt')
-

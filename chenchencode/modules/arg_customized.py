@@ -92,7 +92,7 @@ class find_centerline_veh_coor(object):
         self.line_set_shapely = line_set_shapely
         self.line_set_array = line_set_array
 
-    def find(self, output_type='list'):
+    def find(self, output_type='df'):
         '''
         Args:
             output_type: which type of output will be: ['list', 'df', 'tensor']
@@ -118,7 +118,7 @@ class find_centerline_veh_coor(object):
         elif output_type == 'df':
             for lane_id in est_id_Se.index:
                 cl = DataFrame(self.line_set_array[lane_id], columns=['X', 'Y'])
-                cl['TIMESTAMP'] = 0
+                cl['TIMESTAMP'] = np.arange(cl.shape[0]) / 10
                 cl['TRACK_ID'] = -1 * est_id_Se[lane_id]
                 cl = cl[['TIMESTAMP', 'TRACK_ID', 'X', 'Y']]
                 if i == 0:
@@ -145,7 +145,8 @@ class data_loader_customized(object):
                  return_type='df',
                  include_centerline=False,
                  rotation_to_standard=False,
-                 save_preprocessed_data=False
+                 save_preprocessed_data=False,
+                 fast_read_check=True
                  ):
         '''
         Args:
@@ -161,7 +162,12 @@ class data_loader_customized(object):
             include_centerline: bool (default=False), if true, the center line will be found.
             rotation_to_standard: bool (default=False), if true, all the data (traj and centerline) will be rotated to make the ego vehicle drive from south to north
             save_preprocessed_data: bool (default=False), if true, the pre-processed data will be saved to '../forecasting_sample/preprocess_data' folder
+            fast_read_check: bool (default=True), if true, the function will check if there are preprocessed data
         '''
+        self.fast_read_check = fast_read_check
+        self.save_preprocessed_data = save_preprocessed_data
+        if self.save_preprocessed_data: self.fast_read_check = True
+
         if range_const:
             if isinstance(range_dis_list, str):
                 assert range_dis_list == 'default', 'range_dis_list is needed'
@@ -179,18 +185,45 @@ class data_loader_customized(object):
                           str(norm_range_time) + '_' + str(norm_range) + '_' + str(range_const) + '_' + \
                           str(range_dis_list) + '_' + return_type + '_' + str(include_centerline) + '_' + \
                           str(rotation_to_standard)
-        if not os.path.exists(self.dir_processed_data):
-            print('>>> DATA <<< New folder for pre-processed data is created: %s' % self.dir_processed_data)
-            os.makedirs(self.dir_processed_data)
-            torch.save(preprocess_info, os.path.join(self.dir_processed_data, 'pre_process_info.pkl'))
-        else:
-            last_preprocess_info = torch.load(os.path.join(self.dir_processed_data, 'pre_process_info.pkl'))
-            if preprocess_info != last_preprocess_info:
-                print('Pre-processed data folder exist, and the pre-processe method is', \
-                      'different with current, please dealing with it first')
-                raise FileExistsError
+        if self.fast_read_check:
+            if not os.path.exists(self.dir_processed_data):
+                print(
+                    '>>>>>>>>>>>>>>> DATA Warning <<<<<<<<<<<<<<< \nNew folder for pre-processed data is created: %s' % self.dir_processed_data)
+                os.makedirs(self.dir_processed_data)
+                torch.save(preprocess_info, os.path.join(self.dir_processed_data, 'pre_process_info.pkl'))
             else:
-                print('>>> DATA <<< Pre-processed data fold check passed')
+                last_preprocess_info = torch.load(os.path.join(self.dir_processed_data, 'pre_process_info.pkl'))
+                if preprocess_info != last_preprocess_info:
+                    print(
+                        '>>>>>>>>>>>>>>> DATA Warning <<<<<<<<<<<<<<< \nPre-processed data folder exist, and the pre-processe method is', \
+                        'different with current, please dealing with it first')
+                    tmp = last_preprocess_info.split('_')
+                    last_preprocess_info_dict = {'know_num': tmp[0],
+                                                 'agent_first': tmp[1],
+                                                 'normalization': tmp[2],
+                                                 'norm_range_time': tmp[3],
+                                                 'norm_range': tmp[4],
+                                                 'range_const': tmp[5],
+                                                 'range_dis_list': tmp[6],
+                                                 'return_type': tmp[7],
+                                                 'include_centerline': tmp[8],
+                                                 'rotation_to_standard': tmp[9]}
+                    print(last_preprocess_info_dict)
+                    raise FileExistsError
+                else:
+                    print('>>>>>>>>>>>>>>> DATA Warning <<<<<<<<<<<<<<< \nPre-processed data fold check passed')
+                    print('preprocess_info is:')
+                    preprocess_info_dict = {'know_num': know_num,
+                                            'agent_first': agent_first,
+                                            'normalization': normalization,
+                                            'norm_range_time': norm_range_time,
+                                            'norm_range': norm_range,
+                                            'range_const': range_const,
+                                            'range_dis_list': range_dis_list,
+                                            'return_type': return_type,
+                                            'include_centerline': include_centerline,
+                                            'rotation_to_standard': rotation_to_standard}
+                    print(preprocess_info_dict)
 
         self.dir_data_path = dir_data_path
         self.know_num = know_num
@@ -203,7 +236,6 @@ class data_loader_customized(object):
         self.return_type = return_type
         self.include_centerline = include_centerline
         self.rotation_to_standard = rotation_to_standard
-        self.save_preprocessed_data = save_preprocessed_data
 
         self.max_time = 4.9
         self.data_point_num = 50
@@ -237,6 +269,8 @@ class data_loader_customized(object):
             all of the output are interpolated
         """
         self.file_name = file_name
+        assert file_name[
+               -4:] == '.csv', '>>>>>>>>>>>>>>> DATA Warning <<<<<<<<<<<<<<< \n Input file name should be *csv'
         self.save_file_path = os.path.join(self.dir_processed_data, file_name[:-4] + '.pkl')
         if self.save_tensor and self.exist_detection():
             return torch.load(self.file_path)
@@ -357,7 +391,7 @@ class data_loader_customized(object):
         '''
         Used to de-standard the predicted coordinates
         '''
-        if isinstance(raw_data, torch.tensor):
+        if isinstance(raw_data, torch.Tensor):
             return (raw_data * self.norm_range) + torch.tensor([self.x0, self.y0])
         elif isinstance(raw_data, DataFrame):
             return raw_data[['X', 'Y']] * self.norm_range + [self.x0, self.y0]
@@ -375,30 +409,33 @@ class data_loader_customized(object):
 
         return raw_data
 
-    def get_absolute_error(self, pred, y):
+    def get_absolute_error(self, pred, y, print_error=True):
         '''
         get absolute error, unit:m
         '''
+        assert isinstance(pred, torch.Tensor) and isinstance(y, torch.Tensor), 'Input should be tensor'
         pred, y = pred * self.norm_range, y * self.norm_range
         error_all = (pred - y).pow(2).sum(-1).sqrt()
         # each sample
-        each_error_mean = error_all.mean(1)
-        each_error_at_1sec = [x[9] for x in error_all]
-        each_error_at_2sec = [x[19] for x in error_all]
-        each_error_at_3sec = [x[29] for x in error_all]
+        each_error_mean = float(error_all.mean(1))
+        each_error_at_1sec = [float(x[9]) for x in error_all]
+        each_error_at_2sec = [float(x[19]) for x in error_all]
+        each_error_at_3sec = [float(x[29]) for x in error_all]
         # all test sample
-        error_mean = error_all.mean()
-        error_at_1sec = error_all.mean(0)[9]
-        error_at_2sec = error_all.mean(0)[19]
-        error_at_3sec = error_all.mean(0)[29]
+        error_mean = float(error_all.mean())
+        error_at_1sec = float(error_all.mean(0)[9])
+        error_at_2sec = float(error_all.mean(0)[19])
+        error_at_3sec = float(error_all.mean(0)[29])
 
-        print('For each sample: \n ->mean_DE=%s m \n -> DE@1=%s m \n -> DE@2=%s m \n -> DE@3=%s m' % (
-            each_error_mean, each_error_at_1sec, each_error_at_2sec, each_error_at_3sec))
-        print('For all sample: \n ->mean_DE=%s m \n -> DE@1=%s m \n -> DE@2=%s m \n -> DE@3=%s m' % (
-            error_mean, error_at_1sec, error_at_2sec, error_at_3sec))
+        if print_error:
+            print('>>>>>>>>>>>>>>> RESULTS <<<<<<<<<<<<<<< \n')
+            print('For each sample: \n ->mean_DE=%s m \n -> DE@1=%s m \n -> DE@2=%s m \n -> DE@3=%s m' % (
+                each_error_mean, each_error_at_1sec, each_error_at_2sec, each_error_at_3sec))
+            print('For all sample: \n ->mean_DE=%s m \n -> DE@1=%s m \n -> DE@2=%s m \n -> DE@3=%s m' % (
+                error_mean, error_at_1sec, error_at_2sec, error_at_3sec))
 
-        return ([each_error_mean, each_error_at_1sec, each_error_at_2sec, each_error_at_3sec],
-                [error_mean, error_at_1sec, error_at_2sec, error_at_3sec])
+        return {'Each_eror': [each_error_mean, each_error_at_1sec, each_error_at_2sec, each_error_at_3sec],
+                'Average_error': [error_mean, error_at_1sec, error_at_2sec, error_at_3sec]}
 
     def get_main_dirction(self, use_point=10):
         """
@@ -546,11 +583,12 @@ def ceshi_2():
     import matplotlib.pyplot as plt
     pd.set_option('max_rows', 300)
     file_path = r'e:\argoverse-api-ccuse\forecasting_sample\data'
+    # file_path = r'e:\数据集\03_Argoverse\forecasting_train_v1.1.tar\train\data'
     fdlc = data_loader_customized(file_path, agent_first=True, normalization=True, range_const=True,
-                                  include_centerline=True, rotation_to_standard=True, save_preprocessed_data=False,
-                                  return_type='df')
+                                  include_centerline=True, rotation_to_standard=False, save_preprocessed_data=False,
+                                  return_type='df', fast_read_check=True)
 
-    kd, re_cl, pda = fdlc.get_all_traj_for_train(r'11.csv')
+    kd, re_cl, pda = fdlc.get_all_traj_for_train(r'3828.csv')
     off_dis = 0.01
     g = kd.groupby('TRACK_ID')
     for name, data in g:

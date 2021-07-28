@@ -3,6 +3,8 @@
 # 7月22日: 增加保存模型的函数
 
 import os
+
+import numpy as np
 import torch
 import time
 import pandas as pd
@@ -27,25 +29,30 @@ class Recorder(object):
                  }
         save_file = r'i_' + str(ite_num) + '_full_net_state.pkl'
         torch.save(state, os.path.join(self.save_dir, save_file))
-        pass
+
+    def general_record(self, ite_num, name, info):
+        save_file = r'i_' + str(ite_num) + str(name) + '.pkl'
+        torch.save(info, os.path.join(self.save_dir, save_file))
 
     def save_test(self):
         x = pd.DataFrame()
         save_file = r'x.csv'
         x.to_csv(os.path.join(self.save_dir, save_file))
 
-def position_encoding(output_size, x, max_len=50):
-    pe = torch.zeros(max_len, output_size)
-    position = torch.arange(0, max_len).unsqueeze(1)
-    print(torch.arange(0, output_size, 2))
-    div_term = torch.exp(torch.arange(0, output_size, 2) *- (math.log(10000.0) / output_size))
-    pe[:,0::2] = torch.sin(position*div_term)
-    pe[:,1::2] = torch.cos(position*div_term)
-    pe = pe.unsqueeze(0)
-    return pe[:,:x.size(1)]
+
+class Position_encoding(object):
+    def __init__(self, output_size, max_len=100):
+        assert output_size > 0 and output_size % 2 == 0, 'position encoding output size should > 0 and be a even number'
+        self.pe = np.zeros((max_len, output_size))
+        position = np.arange(0, max_len).reshape(-1, 1)
+        div_term = np.exp(np.arange(0, output_size, 2) * - (np.log(10000.0) / output_size))
+        self.pe[:, 0::2] = np.sin(position * div_term)
+        self.pe[:, 1::2] = np.cos(position * div_term)
+
+    def encoding(self, raw_data_length):
+        return self.pe[:raw_data_length, :]
+
 
 if __name__ == '__main__':
-    r = Recorder(method_version='Method_test')
-    print(r.save_dir)
-    r.save_test()
-
+    position_ecder = Position_encoding(2)
+    print(position_ecder.encoding(5))

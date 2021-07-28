@@ -76,7 +76,8 @@ fdlc = data_loader_customized(dir_data_path,
                               return_type='df',
                               include_centerline=False,
                               rotation_to_standard=False,
-                              save_preprocessed_data=False)
+                              save_preprocessed_data=False,
+                              fast_read_check=True)
 
 # Args:
 #    dir_data_path: str, dir path that contains the data files (.csv), example:'../forecasting_sample/data'
@@ -91,6 +92,7 @@ fdlc = data_loader_customized(dir_data_path,
 #    include_centerline: bool (default=False), if true, the center line will be found.
 #    rotation_to_standard: bool (default=False), if true, all the data (traj and centerline) will be rotated to make the ego vehicle drive from south to north
 #    save_preprocessed_data: bool (default=False), if true, the pre-processed data will be saved to '../forecasting_sample/preprocess_data' folder
+#    fast_read_check: bool (default=True), if true, the function will check if there are preprocessed data
 ```
 
 #### 2.1 Get other vehicle data from forecasting data
