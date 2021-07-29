@@ -51,7 +51,7 @@ def co_fn(data_tuple):
 
 
 class Encoder(nn.Module):
-    def __init__(self, in_ch=3, out_ch_x11=8, out_ch_x12=8, out_ch_x21=8, out_ch_x22=1, fc_in=8, out_ch_final=64):
+    def __init__(self, in_ch=3, out_ch_x11=8, out_ch_x12=8, out_ch_x21=8, out_ch_x22=1, fc_in=8, out_ch_final=128):
         super(Encoder, self).__init__()
         self.in_channel = in_ch
         self.out_ch_x11 = out_ch_x11
@@ -107,7 +107,7 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, in_ch=2, fc_out=16, lstm_ch_hidden=64, out_ch_final=2):
+    def __init__(self, in_ch=2, fc_out=16, lstm_ch_hidden=128, out_ch_final=2):
         super(Decoder, self).__init__()
         self.in_ch = in_ch
         self.fc_out = fc_out
@@ -131,7 +131,7 @@ class Decoder(nn.Module):
 
 
 class Attention_net(nn.Module):
-    def __init__(self, input_ch=64, mid_out_ch=64):
+    def __init__(self, input_ch=128, mid_out_ch=128):
         super(Attention_net, self).__init__()
         self.input_ch = input_ch
         self.mid_out_ch = mid_out_ch
@@ -229,7 +229,7 @@ if __name__ == '__main__':
     method_version = 'version_1'
     loss_version = 3
 
-    raw_data_dir = r'e:\argoverse-api-ccuse\forecasting_sample\data'
+    raw_data_dir = r'e:\数据集\03_Argoverse\forecasting_train_v1.1.tar\train\data'
     file_list = get_file_path_list(raw_data_dir)
     argo_data_reader = data_loader_customized(raw_data_dir,
                                               normalization=True,
@@ -240,7 +240,7 @@ if __name__ == '__main__':
                                               save_preprocessed_data=True,
                                               fast_read_check=True)
 
-    batch_size = 3
+    batch_size = 128
     data = Data_read(file_list, argo_data_reader)
     data_loader = DataLoader(data, batch_size=batch_size, shuffle=True, collate_fn=co_fn)
 
@@ -269,6 +269,7 @@ if __name__ == '__main__':
             optimizer.step()
             scheduler.step(loss)
             e += 1
+            print(e)
             loss_all += float(loss)
             ave_loss = loss_all / (e + 1)
             if e % 100 == 0:  # 每 100 次输出结果，记录ave_loss曲线

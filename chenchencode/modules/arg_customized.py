@@ -118,6 +118,7 @@ class find_centerline_veh_coor(object):
         elif output_type == 'df':
             for lane_id in est_id_Se.index:
                 cl = DataFrame(self.line_set_array[lane_id], columns=['X', 'Y'])
+                if cl.shape[0] != 10: cl = self.cl_fillna(cl)
                 cl['TIMESTAMP'] = np.arange(cl.shape[0]) / 10
                 cl['TRACK_ID'] = -1 * est_id_Se[lane_id]
                 cl = cl[['TIMESTAMP', 'TRACK_ID', 'X', 'Y']]
@@ -130,6 +131,15 @@ class find_centerline_veh_coor(object):
             re_cl = [self.line_set_array[lane_id] for lane_id in est_id]
 
         return re_cl, self.range_box
+
+    def cl_fillna(self, raw_cl):
+        tmp_ = np.zeros((10, 2))
+        tmp_[:] = np.nan
+        standard_cl = DataFrame(tmp_, columns=['X', 'Y'])
+        ind = (10 - len(raw_cl)) // 2
+        standard_cl.iloc[ind:ind + len(raw_cl), :] = raw_cl
+        standard_cl = standard_cl.fillna(method='bfill').fillna(method='ffill')
+        return standard_cl
 
 
 class data_loader_customized(object):
@@ -586,7 +596,7 @@ def ceshi_2():
     # file_path = r'e:\数据集\03_Argoverse\forecasting_train_v1.1.tar\train\data'
     fdlc = data_loader_customized(file_path, agent_first=True, normalization=True, range_const=True,
                                   include_centerline=True, rotation_to_standard=False, save_preprocessed_data=False,
-                                  return_type='df', fast_read_check=True)
+                                  return_type='df', fast_read_check=False)
 
     kd, re_cl, pda = fdlc.get_all_traj_for_train(r'3828.csv')
     off_dis = 0.01
