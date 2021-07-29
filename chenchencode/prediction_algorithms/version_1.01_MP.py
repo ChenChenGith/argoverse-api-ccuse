@@ -7,6 +7,8 @@
 
 # 20210604 修改： 发现使用mseloss会导致所有的点都学习到均值：因为这样确实是loss最小的情况，但不是想要的结果，所以考虑引入方差
 # 20210608 进展：可以成功对单个样本进行预测，精度可以到10-20cm以内
+# 20210729 尝试多进程测试
+
 import numpy as np
 import torch
 import torch.utils.data as data_
