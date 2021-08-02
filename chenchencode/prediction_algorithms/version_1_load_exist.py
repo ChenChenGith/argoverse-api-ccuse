@@ -221,11 +221,22 @@ def loss_cal(pred, y, version=0):
 
     return loss
 
+def load_exist_net(load_path, net, optimizer, scheduler):
+    file_name = os.path.basename(load_path)
+    e = int(file_name.split('_')[1])
+    info = torch.load(load_path)
+    net.load_state_dict(info['net'])
+    optimizer.load_state_dict(info['optimizer'])
+    scheduler.load_state_dict(info['optimizer'])
+    loss_all = info['loss_all']
+
+    return e, net, optimizer, loss_all, scheduler
+
 
 if __name__ == '__main__':
     laod_exit_net = False
     learning_rate = 0.0001
-    recode_freq = 1
+    recode_freq = 500
     method_version = 'version_1'
     loss_version = 3
 
@@ -260,7 +271,11 @@ if __name__ == '__main__':
     e = 1
     ave_loss_rec = []
     tic = time.time()
-    print('Trainning start...')
+
+    e, net, optimizer, loss_all, scheduler = load_exist_net(r'E:\argoverse-api-ccuse\chenchencode\Saved_resultes\20210730_version_1\i_1000_full_net_state.pkl',
+                                                            net, optimizer, scheduler)
+
+    print('Trainning start..., current ite number=%d, ave_loss=%f' % (e, loss_all / e / batch_size))
     while stop_label == 0:
         for batch_id, (x1, x2, y, y_st) in enumerate(data_loader):
             pred = net(x1, x2, y, y_st)
@@ -269,7 +284,6 @@ if __name__ == '__main__':
             loss.backward()
             optimizer.step()
             scheduler.step(loss)
-            e += 1
             loss_all += float(loss)
             ave_loss = loss_all / (e + 1)
             if e % 100 == 0:  # 每 100 次输出结果，记录ave_loss曲线
@@ -292,6 +306,6 @@ if __name__ == '__main__':
             #     teacher_forcing_ratio = 0.5
             if loss < 0.001:
                 stop_label = 1
-
+            e += 1
     # torch.onnx.export(net, (x1, x2, y, y_st), 'viz.pt', opset_version=11)
     # netron.start('viz.pt')

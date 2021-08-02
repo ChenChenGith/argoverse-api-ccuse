@@ -22,6 +22,7 @@ import random
 from chenchencode.modules.utils import Recorder
 import netron
 import time
+from torch.multiprocessing import Process, Queue
 
 import sys
 

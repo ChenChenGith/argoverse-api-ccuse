@@ -52,6 +52,16 @@ class Position_encoding(object):
     def encoding(self, raw_data_length):
         return self.pe[:raw_data_length, :]
 
+def load_exist_net(load_path, net, optimizer, scheduler):
+    file_name = os.path.basename(load_path)
+    ite_num = int(file_name.split('_')[1])
+    info = torch.load(load_path)
+    net.load_state_dict(info['net'])
+    optimizer.load_state_dict(info['optimizer'])
+    scheduler.load_state_dict(info['optimizer'])
+    loss_all = info['loss_all']
+
+    return ite_num, net, optimizer, loss_all, scheduler
 
 if __name__ == '__main__':
     position_ecder = Position_encoding(2)

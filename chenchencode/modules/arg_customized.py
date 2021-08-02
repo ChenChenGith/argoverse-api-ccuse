@@ -427,7 +427,7 @@ class data_loader_customized(object):
         pred, y = pred * self.norm_range, y * self.norm_range
         error_all = (pred - y).pow(2).sum(-1).sqrt()
         # each sample
-        each_error_mean = float(error_all.mean(1))
+        each_error_mean = error_all.mean(1)
         each_error_at_1sec = [float(x[9]) for x in error_all]
         each_error_at_2sec = [float(x[19]) for x in error_all]
         each_error_at_3sec = [float(x[29]) for x in error_all]
