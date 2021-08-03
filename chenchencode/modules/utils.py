@@ -52,6 +52,32 @@ class Position_encoding(object):
     def encoding(self, raw_data_length):
         return self.pe[:raw_data_length, :]
 
+
+def loss_cal(pred, y, loss_version=0):
+    if loss_version == 0:  # 仅MSELoss，即坐标的曼哈顿距离
+        loss = torch.nn.MSELoss(pred, y)
+    elif loss_version == 1:  # sqrt(MSE)
+        # loss_var = torch.abs(pred.var(1) - y.var(1)).sum()
+        loss = torch.sqrt(torch.nn.MSELoss(pred, y))
+    elif loss_version == 2:  # 欧氏距离
+        loss_med = torch.pow(pred - y, 2)
+        loss = loss_med.sum(-1)
+        loss = torch.sqrt(loss).sum() / 30 / 2
+    elif loss_version == 3:  # 欧氏距离+邻接点间距，鼓励离散
+        loss_dis = torch.abs(pred.diff(dim=1) - y.diff(dim=1))
+        loss_dis = loss_dis.sum()
+        loss_med = torch.pow(pred - y, 2)
+        loss_med = loss_med.sum(-1)
+        loss_med = torch.sqrt(loss_med).sum() / 30 / 2  # TODO： 治理用的均值，但是上边用的和，上边是否需要取均值？
+        loss = loss_dis + loss_med
+    elif loss_version == 4:  # sqrt(MSE)+邻接点间距，鼓励离散
+        loss_dis = torch.abs(pred.diff(dim=1) - y.diff(dim=1))
+        loss_dis = loss_dis.sum()
+        loss = loss_dis + torch.nn.MSELoss(pred, y)
+
+    return loss
+
+
 def load_exist_net(load_path, net, optimizer, scheduler):
     file_name = os.path.basename(load_path)
     ite_num = int(file_name.split('_')[1])
@@ -62,6 +88,7 @@ def load_exist_net(load_path, net, optimizer, scheduler):
     loss_all = info['loss_all']
 
     return ite_num, net, optimizer, loss_all, scheduler
+
 
 if __name__ == '__main__':
     position_ecder = Position_encoding(2)

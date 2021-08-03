@@ -228,7 +228,7 @@ def loss_cal(pred, y, version=0):
 if __name__ == '__main__':
     laod_exit_net = False
     learning_rate = 0.0001
-    recode_freq = 5000
+    recode_freq = 500
     method_version = 'version_1'
     loss_version = 3
 
@@ -251,10 +251,11 @@ if __name__ == '__main__':
     decoder_net = Decoder()
     attention_net = Attention_net()
     net = Seq2Seq(batch_size=batch_size, encoder=encoder_net, decoder=decoder_net, attention=attention_net)
+    net.share_memory()
 
     criteria = nn.MSELoss()
     optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=1000, )
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=1000)
 
     recorder = Recorder(method_version)
 
