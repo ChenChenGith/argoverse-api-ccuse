@@ -7,7 +7,7 @@
 
 # 20210604 修改： 发现使用mseloss会导致所有的点都学习到均值：因为这样确实是loss最小的情况，但不是想要的结果，所以考虑引入方差
 # 20210608 进展：可以成功对单个样本进行预测，精度可以到10-20cm以内
-# 20210729 尝试多进程测试
+# 20210804 尝试多进程测试
 
 import numpy as np
 import torch
@@ -23,6 +23,7 @@ from chenchencode.modules.utils import Recorder
 import netron
 import time
 from torch.multiprocessing import Process, Queue
+import torch.multiprocessing as mp
 
 import sys
 
@@ -201,28 +202,99 @@ def get_file_path_list(dir_path):
 
 
 def loss_cal(pred, y, version=0):
-    if loss_version == 0:  # 仅MSELoss，即坐标的曼哈顿距离
-        loss = criteria(pred, y)
-    elif loss_version == 1:  # sqrt(MSE)
-        # loss_var = torch.abs(pred.var(1) - y.var(1)).sum()
-        loss = torch.sqrt(criteria(pred, y))
-    elif loss_version == 2:  # 欧氏距离
-        loss_med = torch.pow(pred - y, 2)
-        loss = loss_med.sum(-1)
-        loss = torch.sqrt(loss).sum() / 30 / 2
-    elif loss_version == 3:  # 欧氏距离+邻接点间距，鼓励离散
-        loss_dis = torch.abs(pred.diff(dim=1) - y.diff(dim=1))
-        loss_dis = loss_dis.sum()
-        loss_med = torch.pow(pred - y, 2)
-        loss_med = loss_med.sum(-1)
-        loss_med = torch.sqrt(loss_med).sum() / 30 / 2  # TODO： 治理用的均值，但是上边用的和，上边是否需要取均值？
-        loss = loss_dis + loss_med
-    elif loss_version == 4:  # sqrt(MSE)+邻接点间距，鼓励离散
-        loss_dis = torch.abs(pred.diff(dim=1) - y.diff(dim=1))
-        loss_dis = loss_dis.sum()
-        loss = loss_dis + criteria(pred, y)
+    loss_dis = torch.abs(pred.diff(dim=1) - y.diff(dim=1))
+    loss_dis = loss_dis.sum()
+    loss_med = torch.pow(pred - y, 2)
+    loss_med = loss_med.sum(-1)
+    loss_med = torch.sqrt(loss_med).sum() / 30 / 2  # TODO： 治理用的均值，但是上边用的和，上边是否需要取均值？
+    loss = loss_dis + loss_med
 
     return loss
+
+def load_exist_net(load_path, net, optimizer, scheduler):
+    file_name = os.path.basename(load_path)
+    e = int(file_name.split('_')[1])
+    info = torch.load(load_path)
+    net.load_state_dict(info['net'])
+    optimizer.load_state_dict(info['optimizer'])
+    scheduler.load_state_dict(info['optimizer'])
+    loss_all = info['loss_all']
+
+    return e, net, optimizer, loss_all, scheduler
+
+class Learner(object):
+    def __init__(self, data_loader, net, net_share, stop_sign, criteria, optimizer, p_num):
+        self.data_loader = data_loader
+        self.net = net
+        self.net_share = net_share
+        self.stop_sign = stop_sign
+        self.criteria = criteria
+        self.optimizer = optimizer
+        self.p_num = p_num
+
+    def run(self):
+        print('learner %d start...' % self.p_num)
+
+
+def mp_training():
+    mp.set_start_method('spawn')
+
+    learning_rate = 0.0001
+    recode_freq = 500
+    method_version = 'version_1'
+    batch_size = 128
+
+    raw_data_dir = r'e:\数据集\03_Argoverse\forecasting_train_v1.1.tar\train\data'
+    file_list = get_file_path_list(raw_data_dir)
+    argo_data_reader = data_loader_customized(raw_data_dir,
+                                              normalization=True,
+                                              range_const=True,
+                                              return_type='list[tensor]',
+                                              include_centerline=True,
+                                              rotation_to_standard=True,
+                                              save_preprocessed_data=True,
+                                              fast_read_check=True)
+
+    data = Data_read(file_list, argo_data_reader)
+    data_loader = DataLoader(data, batch_size=batch_size, shuffle=True, collate_fn=co_fn)
+
+    encoder_net = Encoder()
+    encoder_net.share_memory()
+    decoder_net = Decoder()
+    decoder_net.share_memory()
+    attention_net = Attention_net()
+    attention_net.share_memory()
+    net = Seq2Seq(batch_size=batch_size, encoder=encoder_net, decoder=decoder_net, attention=attention_net)
+    net.share_memory()
+
+    encoder_net_share = Encoder()
+    encoder_net_share.share_memory()
+    decoder_net_share = Decoder()
+    decoder_net_share.share_memory()
+    attention_net_share = Attention_net()
+    attention_net_share.share_memory()
+    net_share = Seq2Seq(batch_size=batch_size, encoder=encoder_net, decoder=decoder_net, attention=attention_net)
+    net_share.share_memory()
+
+    criteria = nn.MSELoss()
+    optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=1000, )
+
+    recorder = Recorder(method_version)
+
+    loss_all = 0
+    stop_label = 0
+    e = 1
+    ave_loss_rec = []
+    tic = time.time()
+
+    e, net, optimizer, loss_all, scheduler = load_exist_net(
+        r'E:\argoverse-api-ccuse\chenchencode\Saved_resultes\20210730_version_1\i_1000_full_net_state.pkl',
+        net, optimizer, scheduler)
+
+    print('Trainning start..., current ite number=%d, ave_loss=%f' % (e, loss_all / e / batch_size))
+
+
 
 
 if __name__ == '__main__':
@@ -267,7 +339,7 @@ if __name__ == '__main__':
     while stop_label == 0:
         for batch_id, (x1, x2, y, y_st) in enumerate(data_loader):
             pred = net(x1, x2, y, y_st)
-            loss = loss_cal(pred, y, loss_version)
+            loss = loss_cal(pred, y)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
