@@ -197,7 +197,8 @@ def get_file_path_list(dir_path):
     return result
 
 
-def loss_cal(pred, y, version=0):
+def loss_cal(pred, y, loss_version=0):
+    criteria = nn.MSELoss()
     if loss_version == 0:  # 仅MSELoss，即坐标的曼哈顿距离
         loss = criteria(pred, y)
     elif loss_version == 1:  # sqrt(MSE)
@@ -227,13 +228,12 @@ def load_exist_net(load_path, net, optimizer, scheduler):
     info = torch.load(load_path)
     net.load_state_dict(info['net'])
     optimizer.load_state_dict(info['optimizer'])
-    scheduler.load_state_dict(info['optimizer'])
+    scheduler.load_state_dict(info['scheduler'])
     loss_all = info['loss_all']
 
     return e, net, optimizer, loss_all, scheduler
 
-
-if __name__ == '__main__':
+def training():
     laod_exit_net = False
     learning_rate = 0.0001
     recode_freq = 500
@@ -260,7 +260,6 @@ if __name__ == '__main__':
     attention_net = Attention_net()
     net = Seq2Seq(batch_size=batch_size, encoder=encoder_net, decoder=decoder_net, attention=attention_net)
 
-    criteria = nn.MSELoss()
     optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=1000, )
 
@@ -272,8 +271,9 @@ if __name__ == '__main__':
     ave_loss_rec = []
     tic = time.time()
 
-    e, net, optimizer, loss_all, scheduler = load_exist_net(r'E:\argoverse-api-ccuse\chenchencode\Saved_resultes\20210730_version_1\i_1000_full_net_state.pkl',
-                                                            net, optimizer, scheduler)
+    e, net, optimizer, loss_all, scheduler = load_exist_net(
+        r'E:\argoverse-api-ccuse\chenchencode\Saved_resultes\20210730_version_1\i_1000_full_net_state.pkl',
+        net, optimizer, scheduler)
 
     print('Trainning start..., current ite number=%d, ave_loss=%f' % (e, loss_all / e / batch_size))
     while stop_label == 0:
@@ -309,3 +309,6 @@ if __name__ == '__main__':
             e += 1
     # torch.onnx.export(net, (x1, x2, y, y_st), 'viz.pt', opset_version=11)
     # netron.start('viz.pt')
+
+if __name__ == '__main__':
+    training()

@@ -22,7 +22,7 @@ import random
 from chenchencode.modules.utils import Recorder
 import netron
 import time
-from torch.multiprocessing import Process, Queue
+from torch.multiprocessing import Process, Queue, Manager
 import torch.multiprocessing as mp
 
 import sys
@@ -55,7 +55,7 @@ def co_fn(data_tuple):
 
 
 class Encoder(nn.Module):
-    def __init__(self, in_ch=3, out_ch_x11=8, out_ch_x12=8, out_ch_x21=8, out_ch_x22=1, fc_in=8, out_ch_final=64):
+    def __init__(self, in_ch=3, out_ch_x11=8, out_ch_x12=8, out_ch_x21=8, out_ch_x22=1, fc_in=8, out_ch_final=128):
         super(Encoder, self).__init__()
         self.in_channel = in_ch
         self.out_ch_x11 = out_ch_x11
@@ -111,7 +111,7 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, in_ch=2, fc_out=16, lstm_ch_hidden=64, out_ch_final=2):
+    def __init__(self, in_ch=2, fc_out=16, lstm_ch_hidden=128, out_ch_final=2):
         super(Decoder, self).__init__()
         self.in_ch = in_ch
         self.fc_out = fc_out
@@ -135,7 +135,7 @@ class Decoder(nn.Module):
 
 
 class Attention_net(nn.Module):
-    def __init__(self, input_ch=64, mid_out_ch=64):
+    def __init__(self, input_ch=128, mid_out_ch=128):
         super(Attention_net, self).__init__()
         self.input_ch = input_ch
         self.mid_out_ch = mid_out_ch
@@ -159,12 +159,13 @@ class Attention_net(nn.Module):
 
 
 class Seq2Seq(nn.Module):
-    def __init__(self, batch_size, encoder, decoder, attention):
+    def __init__(self, batch_size, encoder, decoder, attention, teacher_forcing_ratio):
         super(Seq2Seq, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
         self.attention = attention
         self.batch_size = batch_size
+        self.teacher_forcing_ratio = teacher_forcing_ratio
 
     def forward(self, x1, x2, y, y_st):
         encoder_out = self.encoder(x1, x2)  # list([[],[],..])
@@ -179,18 +180,16 @@ class Seq2Seq(nn.Module):
             for i in range(30):
                 decoder_out, (decoder_hi, decoder_ci) = self.decoder(decoder_input, (decoder_hi, decoder_ci))
                 decoder_hi = self.attention(out_encoder, decoder_hi)
-                if random.random() < teacher_forcing_ratio:
+                if random.random() < self.teacher_forcing_ratio.value:
                     decoder_input = decoder_out
                 else:
                     decoder_input = y[j, i, :].reshape(1, 1, 2)
                 decoder_rec[j][i] = decoder_out[0]
 
-        self.learning_rate = teacher_forcing_ratio
-
         return decoder_rec
 
     def check_learning_rate(self):
-        return self.learning_rate
+        return self.teacher_forcing_ratio.value
 
 
 def get_file_path_list(dir_path):
@@ -201,7 +200,7 @@ def get_file_path_list(dir_path):
     return result
 
 
-def loss_cal(pred, y, version=0):
+def loss_cal(pred, y):
     loss_dis = torch.abs(pred.diff(dim=1) - y.diff(dim=1))
     loss_dis = loss_dis.sum()
     loss_med = torch.pow(pred - y, 2)
@@ -211,29 +210,85 @@ def loss_cal(pred, y, version=0):
 
     return loss
 
+
 def load_exist_net(load_path, net, optimizer, scheduler):
     file_name = os.path.basename(load_path)
     e = int(file_name.split('_')[1])
     info = torch.load(load_path)
     net.load_state_dict(info['net'])
     optimizer.load_state_dict(info['optimizer'])
-    scheduler.load_state_dict(info['optimizer'])
+    scheduler.load_state_dict(info['scheduler'])
     loss_all = info['loss_all']
 
     return e, net, optimizer, loss_all, scheduler
 
+
+def load_ave_loss(load_path):
+    info = torch.load(load_path)
+
+    return info['ave_loss']
+
+
 class Learner(object):
-    def __init__(self, data_loader, net, net_share, stop_sign, criteria, optimizer, p_num):
+    def __init__(self, data_loader, net, net_share, stop_sign, criteria, optimizer, scheduler, recorder, p_num,
+                 ite_num, loss_all, teacher_forcing_ratio, ave_loss_rec, argo_data_reader):
         self.data_loader = data_loader
         self.net = net
         self.net_share = net_share
         self.stop_sign = stop_sign
         self.criteria = criteria
         self.optimizer = optimizer
+        self.scheduler = scheduler
+        self.recorder = recorder
+
         self.p_num = p_num
+        self.ite_num = ite_num
+        self.loss_all = loss_all
+        self.teacher_forcing_ratio = teacher_forcing_ratio
+        self.ave_loss_rec = ave_loss_rec
+
+        self.recode_freq = 500
+
+        self.argo_data_reader = argo_data_reader
 
     def run(self):
         print('learner %d start...' % self.p_num)
+        tic = time.time()
+        while self.stop_sign.value > 0.001:
+            for batch_id, (x1, x2, y, y_st) in enumerate(self.data_loader):
+                pred = self.net(x1, x2, y, y_st)
+                loss = self.criteria(pred, y)
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+                self.scheduler.step(loss)
+                self.loss_all.value += float(loss)
+                ave_loss = self.loss_all.value / (self.ite_num.value + 1)
+                if self.ite_num.value % 100 == 0:  # 每 100 次输出结果，记录ave_loss曲线
+                    print(
+                        'Epoch: {}, Loss: {:.5f}, ave loss: {:.5f}, lr: {:.10f}, teaching rate: {:.3f}, (l+al)/2: {:.5f}'
+                            .format(self.ite_num.value + 1, loss.item(), ave_loss, self.optimizer.param_groups[0]['lr'],
+                                    self.net.check_learning_rate(),
+                                    (ave_loss + float(loss)) / 2))
+                    self.ave_loss_rec.append(ave_loss)
+                    print('learner {}: hundred ite time {:.5f} s'.format(self.p_num, time.time() - tic))
+                    tic = time.time()
+                if self.ite_num.value % self.recode_freq == 0:
+                    self.recorder.recode_state(self.ite_num.value, self.net.state_dict(), self.optimizer.state_dict(), loss,
+                                               self.loss_all.value, self.scheduler.state_dict())
+                    abs_error = self.argo_data_reader.get_absolute_error(pred, y)
+                    self.recorder.general_record(self.ite_num.value, 'abs_error',
+                                                 {'error': abs_error['Average_error'], 'ave_loss': self.ave_loss_rec})
+                self.teacher_forcing_ratio.value = np.clip(np.round((ave_loss + float(loss)) / 2 / 128 - 0.1, 1), 0.0,
+                                                     0.9)
+                self.ite_num.value += 1
+
+
+def learnning(data_loader, net, net_share, stop_sign, criteria, optimizer, scheduler, recorder, p_num,
+              ite_num, loss_all, teacher_forcing_ratio, ave_loss_rec, argo_data_reader):
+    learner = Learner(data_loader, net, net_share, stop_sign, criteria, optimizer, scheduler, recorder, p_num,
+                      ite_num, loss_all, teacher_forcing_ratio, ave_loss_rec, argo_data_reader)
+    learner.run()
 
 
 def mp_training():
@@ -243,6 +298,10 @@ def mp_training():
     recode_freq = 500
     method_version = 'version_1'
     batch_size = 128
+    teacher_forcing_ratio_init = 0.1
+
+    manager = Manager()
+    teacher_forcing_ratio = mp.Value('f', teacher_forcing_ratio_init)
 
     raw_data_dir = r'e:\数据集\03_Argoverse\forecasting_train_v1.1.tar\train\data'
     file_list = get_file_path_list(raw_data_dir)
@@ -264,7 +323,8 @@ def mp_training():
     decoder_net.share_memory()
     attention_net = Attention_net()
     attention_net.share_memory()
-    net = Seq2Seq(batch_size=batch_size, encoder=encoder_net, decoder=decoder_net, attention=attention_net)
+    net = Seq2Seq(batch_size=batch_size, encoder=encoder_net, decoder=decoder_net, attention=attention_net,
+                  teacher_forcing_ratio=teacher_forcing_ratio)
     net.share_memory()
 
     encoder_net_share = Encoder()
@@ -273,100 +333,43 @@ def mp_training():
     decoder_net_share.share_memory()
     attention_net_share = Attention_net()
     attention_net_share.share_memory()
-    net_share = Seq2Seq(batch_size=batch_size, encoder=encoder_net, decoder=decoder_net, attention=attention_net)
+    net_share = Seq2Seq(batch_size=batch_size, encoder=encoder_net_share, decoder=decoder_net_share,
+                        attention=attention_net_share, teacher_forcing_ratio=teacher_forcing_ratio)
     net_share.share_memory()
 
-    criteria = nn.MSELoss()
-    optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=1000, )
-
-    recorder = Recorder(method_version)
-
-    loss_all = 0
-    stop_label = 0
-    e = 1
-    ave_loss_rec = []
-    tic = time.time()
-
-    e, net, optimizer, loss_all, scheduler = load_exist_net(
-        r'E:\argoverse-api-ccuse\chenchencode\Saved_resultes\20210730_version_1\i_1000_full_net_state.pkl',
-        net, optimizer, scheduler)
-
-    print('Trainning start..., current ite number=%d, ave_loss=%f' % (e, loss_all / e / batch_size))
-
-
-
-
-if __name__ == '__main__':
-    laod_exit_net = False
-    learning_rate = 0.0001
-    recode_freq = 500
-    method_version = 'version_1'
-    loss_version = 3
-
-    raw_data_dir = r'e:\argoverse-api-ccuse\forecasting_sample\data'
-    file_list = get_file_path_list(raw_data_dir)
-    argo_data_reader = data_loader_customized(raw_data_dir,
-                                              normalization=True,
-                                              range_const=True,
-                                              return_type='list[tensor]',
-                                              include_centerline=True,
-                                              rotation_to_standard=True,
-                                              save_preprocessed_data=True,
-                                              fast_read_check=True)
-
-    batch_size = 3
-    data = Data_read(file_list, argo_data_reader)
-    data_loader = DataLoader(data, batch_size=batch_size, shuffle=True, collate_fn=co_fn)
-
-    encoder_net = Encoder()
-    decoder_net = Decoder()
-    attention_net = Attention_net()
-    net = Seq2Seq(batch_size=batch_size, encoder=encoder_net, decoder=decoder_net, attention=attention_net)
-    net.share_memory()
-
-    criteria = nn.MSELoss()
     optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=1000)
 
+    e, net, optimizer, loss_all, scheduler = load_exist_net(
+        r'E:\argoverse-api-ccuse\chenchencode\Saved_resultes\20210802_version_1\i_9000_full_net_state.pkl',
+        net, optimizer, scheduler)
+
+    ave_loss_rec = load_ave_loss(
+        r'E:\argoverse-api-ccuse\chenchencode\Saved_resultes\20210802_version_1\i_9000abs_error.pkl')
+    ave_loss_rec = manager.list(ave_loss_rec)
+
+    net_share.load_state_dict(net.state_dict())
+
     recorder = Recorder(method_version)
 
-    loss_all = 0
-    stop_label = 0
-    e = 1
-    ave_loss_rec = []
-    tic = time.time()
-    while stop_label == 0:
-        for batch_id, (x1, x2, y, y_st) in enumerate(data_loader):
-            pred = net(x1, x2, y, y_st)
-            loss = loss_cal(pred, y)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            scheduler.step(loss)
-            e += 1
-            loss_all += float(loss)
-            ave_loss = loss_all / (e + 1)
-            if e % 100 == 0:  # 每 100 次输出结果，记录ave_loss曲线
-                print('Epoch: {}, Loss: {:.5f}, ave loss: {:.5f}, lr: {:.10f}, teaching rate: {:.3f}, (l+al)/2: {:.5f}'
-                      .format(e + 1, loss.item(), ave_loss, optimizer.param_groups[0]['lr'], net.check_learning_rate(),
-                              (ave_loss + float(loss)) / 2))
-                ave_loss_rec.append(ave_loss)
-                print('time {:.5f} s'.format(time.time() - tic))
-                tic = time.time()
-            if e % recode_freq == 0:
-                recorder.recode_state(e, net.state_dict(), optimizer.state_dict(), loss, loss_all,
-                                      scheduler.state_dict())
-                abs_error = argo_data_reader.get_absolute_error(pred, y)
-                recorder.general_record(e, 'abs_error', {'error': abs_error['Average_error'], 'ave_loss': ave_loss_rec})
-            # del loss
-            teacher_forcing_ratio = np.clip(np.round((ave_loss + float(loss)) / 2, 1), 0.0, 0.9)
-            # if ave_loss < 0.3:
-            #     teacher_forcing_ratio = 0.1
-            # if ave_loss >= 0.3:
-            #     teacher_forcing_ratio = 0.5
-            if loss < 0.001:
-                stop_label = 1
+    stop_sign = mp.Value('i', 20)
+    ite_num = mp.Value('i', e)
+    loss_all = mp.Value('f', loss_all)
 
-    # torch.onnx.export(net, (x1, x2, y, y_st), 'viz.pt', opset_version=11)
-    # netron.start('viz.pt')
+    print('Trainning start..., current ite number=%d, ave_loss=%f' % (e, loss_all.value / e / batch_size))
+
+    p_process = []
+    for x in range(3):
+        p_process.append(
+            Process(target=learnning,
+                    args=(data_loader, net, net_share, stop_sign, loss_cal, optimizer, scheduler, recorder, x,
+                          ite_num, loss_all, teacher_forcing_ratio, ave_loss_rec, argo_data_reader)))
+
+    for p in p_process:
+        p.start()
+    for p in p_process:
+        p.join()
+
+
+if __name__ == '__main__':
+    mp_training()
