@@ -370,6 +370,56 @@ def mp_training():
     for p in p_process:
         p.join()
 
+def mp_verify():
+
+    raw_data_dir = r'E:\数据集\03_Argoverse\forecasting_val_v1.1.tar\forecasting_val_v1.1\val\data'
+    file_list = get_file_path_list(raw_data_dir)
+    argo_data_reader = data_loader_customized(raw_data_dir,
+                                              normalization=True,
+                                              range_const=True,
+                                              return_type='list[tensor]',
+                                              include_centerline=True,
+                                              rotation_to_standard=True,
+                                              save_preprocessed_data=True,
+                                              fast_read_check=True)
+    batch_size = 128
+    data = Data_read(file_list, argo_data_reader)
+    data_loader = DataLoader(data, batch_size=batch_size, shuffle=False, collate_fn=co_fn)
+
+    encoder_net = Encoder()
+    decoder_net = Decoder()
+    attention_net = Attention_net()
+    net = Seq2Seq(batch_size=batch_size, encoder=encoder_net, decoder=decoder_net, attention=attention_net)
+
+    info = torch.load(r'E:\argoverse-api-ccuse\chenchencode\Saved_resultes\20210802_version_1\i_9000_full_net_state.pkl')
+    net.load_state_dict(info['net'])
+
+    for batch_id, (x1, x2, y, y_st) in enumerate(data_loader):
+        pred = net(x1, x2, y, y_st)
+        abs_error = argo_data_reader.get_absolute_error(pred, y)
+
 
 if __name__ == '__main__':
-    mp_training()
+    # mp_training()
+    mp.set_start_method("spawn")
+    num_workers = mp.cpu_count() - 1
+    print(f"num of workers {num_workers}")
+
+    raw_data_dir = r'E:\数据集\03_Argoverse\forecasting_val_v1.1.tar\forecasting_val_v1.1\val\data'
+    file_list = get_file_path_list(raw_data_dir)
+    argo_data_reader = data_loader_customized(raw_data_dir,
+                                              normalization=True,
+                                              range_const=True,
+                                              return_type='list[tensor]',
+                                              include_centerline=True,
+                                              rotation_to_standard=True,
+                                              save_preprocessed_data=True,
+                                              fast_read_check=True)
+    batch_size = 128
+    data = Data_read(file_list, argo_data_reader)
+
+    data_loader = DataLoader(data, batch_size=batch_size, num_workers=3, collate_fn=co_fn)
+    for batch_id, (x1, x2, y, y_st) in enumerate(data_loader):
+
+        pass
+
