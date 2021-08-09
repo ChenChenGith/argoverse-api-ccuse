@@ -311,6 +311,7 @@ def training():
     # netron.start('viz.pt')
 
 def verify():
+    teacher_forcing_ratio = -1.0
     raw_data_dir = r'E:\数据集\03_Argoverse\forecasting_val_v1.1.tar\forecasting_val_v1.1\val\data'
     file_list = get_file_path_list(raw_data_dir)
     argo_data_reader = data_loader_customized(raw_data_dir,
@@ -340,7 +341,7 @@ def verify():
 
     e = 0
     recorder = Recorder(method_version='version_1_val')
-    record_freq = 500
+    record_freq = 100
     print_error = True
 
     for batch_id, (x1, x2, y, y_st) in enumerate(data_loader):
@@ -355,16 +356,80 @@ def verify():
 
         e += 1
 
-        if e % record_freq == 0:
+        if e % 50 == 0:
             print('ite num: %d' % e)
             print_error = True
-        if e % record_freq == 0:
-            recorder.general_record(0, 'val_abs_error', {'error_save_mean': error_save_mean,
+        if e % record_freq == 0 or e > 300:
+            recorder.general_record(e, 'val_abs_error', {'error_save_mean': error_save_mean,
                                                          'error_save_at_1sec': error_save_at_1sec,
                                                          'error_save_at_2sec': error_save_at_2sec,
                                                          'error_save_at_3sec': error_save_at_3sec})
             print('ite num %d saved' % e)
 
 
+def data_test():
+    teacher_forcing_ratio = -1.0
+    raw_data_dir = r'E:\数据集\03_Argoverse\forecasting_test_v1.1.tar\forecasting_test_v1.1\test_obs\data'
+    file_list = get_file_path_list(raw_data_dir)
+    argo_data_reader = data_loader_customized(raw_data_dir,
+                                              normalization=True,
+                                              range_const=True,
+                                              return_type='list[tensor]',
+                                              include_centerline=True,
+                                              rotation_to_standard=True,
+                                              save_preprocessed_data=True,
+                                              fast_read_check=True)
+    batch_size = 128
+    data = Data_read(file_list, argo_data_reader)
+    data_loader = DataLoader(data, batch_size=batch_size, shuffle=True, collate_fn=co_fn)
+
+    encoder_net = Encoder()
+    decoder_net = Decoder()
+    attention_net = Attention_net()
+    net = Seq2Seq(batch_size=batch_size, encoder=encoder_net, decoder=decoder_net, attention=attention_net)
+
+    info = torch.load(r'E:\argoverse-api-ccuse\chenchencode\Saved_resultes\20210802_version_1\i_9000_full_net_state.pkl')
+    net.load_state_dict(info['net'])
+
+    error_save_mean = []
+    error_save_at_1sec = []
+    error_save_at_2sec = []
+    error_save_at_3sec = []
+
+    e = 0
+    recorder = Recorder(method_version='version_1_val')
+    record_freq = 100
+    print_error = True
+
+    for batch_id, (x1, x2, y, y_st) in enumerate(data_loader):
+        pred = net(x1, x2, y, y_st)
+        abs_error = argo_data_reader.get_absolute_error(pred, y, print_error=print_error)
+        if print_error: print_error = False
+
+        error_save_mean += abs_error['Each_eror'][0].tolist()
+        error_save_at_1sec += abs_error['Each_eror'][1]
+        error_save_at_2sec += abs_error['Each_eror'][2]
+        error_save_at_3sec += abs_error['Each_eror'][3]
+
+        e += 1
+
+        if e % 50 == 0:
+            print('ite num: %d' % e)
+            print_error = True
+        if e % record_freq == 0 or e > 600:
+            recorder.general_record(e, 'val_abs_error', {'error_save_mean': error_save_mean,
+                                                         'error_save_at_1sec': error_save_at_1sec,
+                                                         'error_save_at_2sec': error_save_at_2sec,
+                                                         'error_save_at_3sec': error_save_at_3sec})
+            print('ite num %d saved' % e)
+
 if __name__ == '__main__':
-    verify()
+    # verify()
+
+    data_test()
+
+    # xx = torch.load(r'E:\argoverse-api-ccuse\chenchencode\Saved_resultes\20210806_version_1_val\i_309val_abs_error.pkl')
+    # print(np.array(xx['error_save_mean']).mean())
+    # print(np.array(xx['error_save_at_1sec']).mean())
+    # print(np.array(xx['error_save_at_2sec']).mean())
+    # print(np.array(xx['error_save_at_3sec']).mean())
